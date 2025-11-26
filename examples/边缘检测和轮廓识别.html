@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <title>浏览器平面识别 Demo</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+      }
+      canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+      #canvas2d {
+        z-index: 1;
+      }
+      #threejs-canvas {
+        z-index: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <video id="video" autoplay playsinline width="640" height="480" style="display: none"></video>
+    <canvas id="canvas2d" width="640" height="480"></canvas>
+
+    <!-- 引入库 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.10.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script async src="https://docs.opencv.org/4.x/opencv.js" onload="onOpenCvReady();"></script>
+
+    <script>
+      const video = document.getElementById('video')
+      const canvas2d = document.getElementById('canvas2d')
+      const ctx = canvas2d.getContext('2d')
+
+      // 初始化摄像头
+      navigator.mediaDevices.getUserMedia({ video: true }).then((stream) => {
+        video.srcObject = stream
+      })
+      // OpenCV 初始化回调
+      function onOpenCvReady() {
+        cv['onRuntimeInitialized'] = () => {
+          const src = new cv.Mat(480, 640, cv.CV_8UC4)
+          const gray = new cv.Mat()
+          const edges = new cv.Mat()
+          const contours = new cv.MatVector()
+          const hierarchy = new cv.Mat()
+
+          function processFrame() {
+            ctx.drawImage(video, 0, 0, 640, 480)
+            let imageData = ctx.getImageData(0, 0, 640, 480)
+            src.data.set(imageData.data)
+
+            cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY)
+            cv.Canny(gray, edges, 50, 150)
+            cv.findContours(edges, contours, hierarchy, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE)
+
+            ctx.clearRect(0, 0, canvas2d.width, canvas2d.height)
+            for (let i = 0; i < contours.size(); ++i) {
+              let cnt = contours.get(i)
+              let rect = cv.boundingRect(cnt)
+              if (rect.width * rect.height > 10000) {
+                ctx.strokeStyle = 'red'
+                ctx.lineWidth = 2
+                ctx.strokeRect(rect.x, rect.y, rect.width, rect.height)
+              }
+            }
+
+            cv.imshow('canvas2d', edges)
+            requestAnimationFrame(processFrame)
+          }
+
+          requestAnimationFrame(processFrame)
+        }
+      }
+    </script>
+  </body>
+</html>

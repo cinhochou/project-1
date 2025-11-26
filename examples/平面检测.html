@@ -1,0 +1,662 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>浏览器视频流平面识别与标注</title>
+    <!-- Tailwind CSS - 用于快速构建响应式界面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome - 提供图标支持 -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css"
+      rel="stylesheet"
+    />
+    <!-- TensorFlow.js - 用于在浏览器中运行机器学习模型 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <!-- Tensorflow-models/coco-ssd - 预训练的COCO SSD模型，用于对象检测 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#0066cc',
+              secondary: '#00aaff',
+              accent: '#ff6600',
+              dark: '#1a1a2e',
+              light: '#f5f5f7',
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            },
+          },
+        },
+      }
+    </script>
+
+    <style type="text/tailwindcss">
+      @layer utilities {
+        .content-auto {
+          content-visibility: auto;
+        }
+        .glass-effect {
+          background: rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .btn-primary {
+          @apply bg-primary hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50;
+        }
+        .btn-secondary {
+          @apply bg-secondary hover:bg-blue-400 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-opacity-50;
+        }
+        .btn-accent {
+          @apply bg-accent hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-opacity-50;
+        }
+        .card {
+          @apply bg-white rounded-xl shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl;
+        }
+        .card-dark {
+          @apply bg-dark rounded-xl shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+      <!-- Header -->
+      <header class="mb-8 text-center">
+        <h1 class="text-4xl font-bold text-dark mb-2">浏览器视频流平面识别与标注</h1>
+        <p class="text-gray-600">实时识别摄像头视频中的平面（桌子、地板等）并进行标注</p>
+
+        <!-- 使用说明 -->
+        <div class="mt-4 bg-blue-50 border-l-4 border-blue-500 p-4 max-w-2xl mx-auto">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <i class="fa fa-info-circle text-blue-500"></i>
+            </div>
+            <div class="ml-3">
+              <p class="text-sm text-blue-700">
+                <strong>使用说明：</strong
+                >点击"开始识别"按钮，允许摄像头权限后，应用将实时识别并标注视频中的平面区域（如桌子、地板等）。
+                您可以通过右侧控制面板调整识别参数和标注样式。
+              </p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <div class="flex flex-col lg:flex-row gap-6">
+        <!-- Video Section -->
+        <div class="lg:w-2/3">
+          <div class="card relative overflow-hidden">
+            <div class="aspect-w-16 aspect-h-9 bg-black">
+              <!-- Video Element -->
+              <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
+
+              <!-- Canvas for Drawing Annotations -->
+              <canvas
+                id="annotationCanvas"
+                class="absolute top-0 left-0 w-full h-full pointer-events-none"
+              ></canvas>
+
+              <!-- Overlay for Status and Messages -->
+              <div class="absolute top-4 left-4 glass-effect text-white px-4 py-2 rounded-lg">
+                <div id="status" class="flex items-center">
+                  <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                  <span>未启动</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Video Controls -->
+            <div class="p-4 bg-gray-50 border-t border-gray-200">
+              <div class="flex flex-wrap gap-3">
+                <button id="startBtn" class="btn-primary flex items-center">
+                  <i class="fa fa-play mr-2"></i> 开始识别
+                </button>
+                <button id="stopBtn" class="btn-secondary flex items-center" disabled>
+                  <i class="fa fa-stop mr-2"></i> 停止识别
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls and Information Panel -->
+        <div class="lg:w-1/3">
+          <!-- Controls Card -->
+          <div class="card mb-6">
+            <div class="p-4 bg-gray-50 border-b border-gray-200">
+              <h3 class="text-xl font-semibold">识别控制</h3>
+            </div>
+            <div class="p-4">
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="modelSelect">
+                  选择模型
+                </label>
+                <select
+                  id="modelSelect"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="lite_mobilenet_v2">轻量级 MobileNet V2 (速度快)</option>
+                  <option value="mobilenet_v2">MobileNet V2 (更准确)</option>
+                  <option value="mobilenet_v1">MobileNet V1 (平衡)</option>
+                </select>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2"> 标注选项 </label>
+                <div class="space-y-2">
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showBorders" class="mr-2" checked />
+                    <label for="showBorders">显示边框</label>
+                  </div>
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showLabels" class="mr-2" checked />
+                    <label for="showLabels">显示标签</label>
+                  </div>
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showGrid" class="mr-2" />
+                    <label for="showGrid">显示网格</label>
+                  </div>
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showDimensions" class="mr-2" />
+                    <label for="showDimensions">显示尺寸</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="confidenceSlider">
+                  置信度阈值: <span id="confidenceValue">0.5</span>
+                </label>
+                <input
+                  type="range"
+                  id="confidenceSlider"
+                  min="0.1"
+                  max="0.9"
+                  step="0.1"
+                  value="0.5"
+                  class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="maxBoxesInput">
+                  最大检测数量
+                </label>
+                <input
+                  type="number"
+                  id="maxBoxesInput"
+                  min="1"
+                  max="50"
+                  value="20"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- Information Card -->
+          <div class="card">
+            <div class="p-4 bg-gray-50 border-b border-gray-200">
+              <h3 class="text-xl font-semibold">识别信息</h3>
+            </div>
+            <div class="p-4">
+              <div id="detectionInfo" class="space-y-3">
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">帧率:</span>
+                  <span id="fpsCounter" class="font-mono">0 FPS</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">检测到的物体:</span>
+                  <span id="objectsCounter" class="font-mono">0</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">平面数量:</span>
+                  <span id="planesCounter" class="font-mono">0</span>
+                </div>
+              </div>
+
+              <div class="mt-4">
+                <h4 class="font-medium text-gray-700 mb-2">检测到的物体列表:</h4>
+                <ul id="objectsList" class="max-h-40 overflow-y-auto text-sm">
+                  <li class="text-gray-500 italic">未检测到物体</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer class="mt-12 text-center text-gray-500 text-sm">
+        <p>© 2025 浏览器视频流平面识别与标注 | 使用 TensorFlow.js 构建</p>
+      </footer>
+    </div>
+
+    <script>
+      // 全局变量声明
+      // 视频元素
+      let video
+      // 用于绘制标注的画布
+      let canvas
+      // 画布上下文
+      let ctx
+      // TensorFlow.js模型
+      let model
+      // 摄像头视频流
+      let stream
+      // 识别状态标志
+      let isDetecting = false
+      // 用于计算帧率的时间戳
+      let lastFrameTime = 0
+      // 帧数计数器
+      let frameCount = 0
+      // 帧率
+      let fps = 0
+      // 检测到的所有对象
+      let detectedObjects = []
+      // 过滤后的平面对象
+      let detectedPlanes = []
+
+      // DOM元素引用
+      const startBtn = document.getElementById('startBtn') // 开始识别按钮
+      const stopBtn = document.getElementById('stopBtn') // 停止识别按钮
+      const statusElement = document.getElementById('status') // 状态显示元素
+      const fpsCounter = document.getElementById('fpsCounter') // 帧率计数器
+      const objectsCounter = document.getElementById('objectsCounter') // 检测到的对象总数
+      const planesCounter = document.getElementById('planesCounter') // 检测到的平面数量
+      const objectsList = document.getElementById('objectsList') // 检测到的对象列表
+      const modelSelect = document.getElementById('modelSelect') // 模型选择下拉框
+      const confidenceSlider = document.getElementById('confidenceSlider') // 置信度阈值滑块
+      const confidenceValue = document.getElementById('confidenceValue') // 置信度阈值显示
+      const maxBoxesInput = document.getElementById('maxBoxesInput') // 最大检测数量输入框
+      const showBordersCheckbox = document.getElementById('showBorders') // 显示边框复选框
+      const showLabelsCheckbox = document.getElementById('showLabels') // 显示标签复选框
+      const showGridCheckbox = document.getElementById('showGrid') // 显示网格复选框
+      const showDimensionsCheckbox = document.getElementById('showDimensions') // 显示尺寸复选框
+
+      /**
+       * 应用初始化函数
+       * 初始化视频和画布元素，设置事件监听器，检查浏览器兼容性
+       */
+      async function init() {
+        try {
+          // 获取视频和画布元素
+          video = document.getElementById('video')
+          canvas = document.getElementById('annotationCanvas')
+          ctx = canvas.getContext('2d')
+
+          // 设置事件监听器
+          startBtn.addEventListener('click', startDetection)
+          stopBtn.addEventListener('click', stopDetection)
+          confidenceSlider.addEventListener('input', updateConfidenceValue)
+
+          // 检查浏览器是否支持摄像头访问
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('浏览器不支持摄像头访问')
+          }
+
+          console.log('应用初始化完成')
+        } catch (error) {
+          console.error('初始化失败:', error)
+          alert(`初始化失败: ${error.message}`)
+        }
+      }
+
+      /**
+       * 更新置信度阈值显示
+       * 当滑块值改变时，更新显示的置信度值
+       */
+      function updateConfidenceValue() {
+        confidenceValue.textContent = confidenceSlider.value
+      }
+
+      /**
+       * 开始对象检测
+       * 加载模型，获取摄像头权限，启动视频流，开始检测循环
+       */
+      async function startDetection() {
+        try {
+          // 如果已经在检测中，则返回
+          if (isDetecting) return
+
+          // 更新UI状态
+          startBtn.disabled = true
+          stopBtn.disabled = false
+          statusElement.innerHTML =
+            '<span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span><span>加载模型中...</span>'
+
+          // 加载COCO-SSD模型
+          const modelType = modelSelect.value
+          model = await cocoSsd.load({ base: modelType })
+          console.log(`模型 ${modelType} 加载完成`)
+
+          // 获取摄像头视频流
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'environment', // 使用后置摄像头
+              width: { ideal: 1280 }, // 理想宽度
+              height: { ideal: 720 }, // 理想高度
+            },
+            audio: false, // 不需要音频
+          })
+
+          // 设置视频源
+          video.srcObject = stream
+
+          // 等待视频元数据加载完成
+          await new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+              resolve()
+            }
+          })
+
+          // 设置画布尺寸与视频一致
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+
+          // 更新UI状态
+          statusElement.innerHTML =
+            '<span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span><span>正在识别...</span>'
+
+          // 开始检测循环
+          isDetecting = true
+          lastFrameTime = performance.now()
+          frameCount = 0
+
+          // 启动检测
+          detectFrame()
+        } catch (error) {
+          console.error('启动识别失败:', error)
+          alert(`启动识别失败: ${error.message}`)
+          resetUI()
+        }
+      }
+
+      /**
+       * 停止对象检测
+       * 停止检测循环，关闭摄像头流，清除画布，重置UI
+       */
+      function stopDetection() {
+        if (!isDetecting) return
+
+        // 停止检测循环
+        isDetecting = false
+
+        // 停止摄像头流
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop())
+        }
+
+        // 清除画布
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+        // 重置UI
+        resetUI()
+
+        console.log('识别已停止')
+      }
+
+      /**
+       * 重置UI到初始状态
+       * 重置按钮状态、状态显示、计数器和检测结果
+       */
+      function resetUI() {
+        startBtn.disabled = false
+        stopBtn.disabled = true
+        statusElement.innerHTML =
+          '<span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>未启动</span>'
+        fpsCounter.textContent = '0 FPS'
+        objectsCounter.textContent = '0'
+        planesCounter.textContent = '0'
+        objectsList.innerHTML = '<li class="text-gray-500 italic">未检测到物体</li>'
+        detectedObjects = []
+        detectedPlanes = []
+      }
+
+      /**
+       * 单帧检测函数
+       * 计算帧率，检测对象，过滤平面，更新UI和绘制标注
+       */
+      async function detectFrame() {
+        if (!isDetecting) return
+
+        try {
+          // 计算帧率
+          const now = performance.now()
+          frameCount++
+          if (now - lastFrameTime > 1000) {
+            fps = Math.round((frameCount * 1000) / (now - lastFrameTime))
+            fpsCounter.textContent = `${fps} FPS`
+            lastFrameTime = now
+            frameCount = 0
+          }
+
+          // 清除画布
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+          // 检测对象
+          const confidenceThreshold = parseFloat(confidenceSlider.value)
+          const maxBoxes = parseInt(maxBoxesInput.value)
+
+          // 使用模型检测视频中的对象
+          const predictions = await model.detect(video, maxBoxes, confidenceThreshold)
+
+          // 过滤和处理预测结果
+          detectedObjects = predictions
+          detectedPlanes = filterPlanes(predictions)
+
+          // 更新计数器
+          objectsCounter.textContent = detectedObjects.length
+          planesCounter.textContent = detectedPlanes.length
+
+          // 更新对象列表
+          updateObjectsList()
+
+          // 绘制标注
+          drawAnnotations()
+        } catch (error) {
+          console.error('帧检测错误:', error)
+        }
+
+        // 继续检测循环
+        if (isDetecting) {
+          requestAnimationFrame(detectFrame)
+        }
+      }
+
+      /**
+       * 从预测结果中过滤平面类对象
+       * @param {Array} predictions - 模型预测的所有对象
+       * @returns {Array} - 过滤后的平面类对象
+       */
+      function filterPlanes(predictions) {
+        // 基于COCO数据集定义平面类对象
+        const planeClasses = ['dining table', 'table', 'desk', 'floor']
+
+        // 过滤预测结果，只保留平面类对象
+        return predictions.filter((prediction) =>
+          planeClasses.includes(prediction.class.toLowerCase()),
+        )
+      }
+
+      /**
+       * 更新对象列表UI
+       * 按类别统计检测到的对象，并更新列表显示
+       */
+      function updateObjectsList() {
+        if (detectedObjects.length === 0) {
+          objectsList.innerHTML = '<li class="text-gray-500 italic">未检测到物体</li>'
+          return
+        }
+
+        // 按类别分组对象
+        const objectsByClass = {}
+        detectedObjects.forEach((obj) => {
+          if (!objectsByClass[obj.class]) {
+            objectsByClass[obj.class] = 0
+          }
+          objectsByClass[obj.class]++
+        })
+
+        // 创建列表项
+        objectsList.innerHTML = ''
+        Object.keys(objectsByClass).forEach((className) => {
+          const count = objectsByClass[className]
+          const li = document.createElement('li')
+          li.className = 'flex justify-between items-center py-1 border-b border-gray-100'
+          li.innerHTML = `
+          <span>${className}</span>
+          <span class="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-xs">${count}</span>
+        `
+          objectsList.appendChild(li)
+        })
+      }
+
+      /**
+       * 在画布上绘制标注
+       * 根据用户选择的标注选项，绘制边框、标签、网格和尺寸信息
+       */
+      function drawAnnotations() {
+        // 如果没有选择任何标注选项，则返回
+        if (
+          !showBordersCheckbox.checked &&
+          !showLabelsCheckbox.checked &&
+          !showGridCheckbox.checked &&
+          !showDimensionsCheckbox.checked
+        ) {
+          return
+        }
+
+        // 绘制平面标注
+        detectedPlanes.forEach((plane, index) => {
+          const { bbox, class: className } = plane
+          const [x, y, width, height] = bbox
+
+          // 为每个平面生成唯一的颜色
+          const hue = (index * 137) % 360 // 使用黄金角算法获取不同的颜色
+          const color = `hsl(${hue}, 70%, 50%)`
+
+          // 绘制边框
+          if (showBordersCheckbox.checked) {
+            ctx.strokeStyle = color
+            ctx.lineWidth = 3
+            ctx.strokeRect(x, y, width, height)
+          }
+
+          // 绘制标签
+          if (showLabelsCheckbox.checked) {
+            ctx.fillStyle = color
+            ctx.fillRect(x, y - 20, 100, 20)
+            ctx.fillStyle = 'white'
+            ctx.font = '14px Arial'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText(className, x + 50, y - 10)
+          }
+
+          // 绘制网格
+          if (showGridCheckbox.checked) {
+            drawGrid(x, y, width, height, color, 20)
+          }
+
+          // 绘制尺寸
+          if (showDimensionsCheckbox.checked) {
+            drawDimensions(x, y, width, height, color)
+          }
+        })
+      }
+
+      /**
+       * 在平面上绘制网格
+       * @param {number} x - 平面左上角x坐标
+       * @param {number} y - 平面左上角y坐标
+       * @param {number} width - 平面宽度
+       * @param {number} height - 平面高度
+       * @param {string} color - 网格颜色
+       * @param {number} gridSize - 网格大小
+       */
+      function drawGrid(x, y, width, height, color, gridSize) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1
+        ctx.globalAlpha = 0.5 // 设置透明度
+
+        // 绘制垂直线
+        for (let i = 0; i <= width; i += gridSize) {
+          ctx.beginPath()
+          ctx.moveTo(x + i, y)
+          ctx.lineTo(x + i, y + height)
+          ctx.stroke()
+        }
+
+        // 绘制水平线
+        for (let i = 0; i <= height; i += gridSize) {
+          ctx.beginPath()
+          ctx.moveTo(x, y + i)
+          ctx.lineTo(x + width, y + i)
+          ctx.stroke()
+        }
+
+        ctx.globalAlpha = 1.0 // 恢复透明度
+      }
+
+      /**
+       * 绘制平面的尺寸信息
+       * @param {number} x - 平面左上角x坐标
+       * @param {number} y - 平面左上角y坐标
+       * @param {number} width - 平面宽度
+       * @param {number} height - 平面高度
+       * @param {string} color - 尺寸文本背景色
+       */
+      function drawDimensions(x, y, width, height, color) {
+        const textSize = 14
+        const padding = 5
+
+        ctx.fillStyle = color
+        ctx.font = `${textSize}px Arial`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+
+        // 绘制宽度尺寸
+        const widthText = `${Math.round(width)}px`
+        const widthTextWidth = ctx.measureText(widthText).width
+
+        ctx.fillRect(
+          x + width / 2 - widthTextWidth / 2 - padding,
+          y - textSize - padding * 2,
+          widthTextWidth + padding * 2,
+          textSize + padding * 2,
+        )
+
+        ctx.fillStyle = 'white'
+        ctx.fillText(widthText, x + width / 2, y - textSize / 2 - padding)
+
+        // 绘制高度尺寸
+        const heightText = `${Math.round(height)}px`
+        const heightTextWidth = ctx.measureText(heightText).width
+
+        ctx.fillStyle = color
+        ctx.fillRect(
+          x - heightTextWidth - padding * 2,
+          y + height / 2 - textSize / 2 - padding,
+          heightTextWidth + padding * 2,
+          textSize + padding * 2,
+        )
+
+        ctx.fillStyle = 'white'
+        ctx.fillText(heightText, x - heightTextWidth / 2 - padding, y + height / 2)
+      }
+
+      /**
+       * 页面加载完成后初始化应用
+       */
+      window.addEventListener('load', init)
+    </script>
+  </body>
+</html>

@@ -1,0 +1,79 @@
+<!doctype html>
+<html>
+  <head>
+    <title>coco-ssd</title>
+    <meta charset="utf-8" />
+    <style>
+      #container {
+        position: relative;
+        width: 640px;
+        height: 480px;
+      }
+      #canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+      }
+      #video {
+        object-fit: cover;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="container">
+      <video id="video" width="640" height="480" autoplay muted></video>
+      <canvas id="canvas" width="640" height="480"></canvas>
+    </div>
+    <div id="output"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/deeplab"></script>
+    <script>
+      ;(async function main() {
+        const video = await setupCamera()
+        const model = await loadModel()
+        detectFrame(video, model) // 开始识别
+      })()
+
+      async function setupCamera() {
+        const video = document.getElementById('video')
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true })
+        video.srcObject = stream
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => resolve(video)
+        })
+      }
+
+      async function loadModel() {
+        return await cocoSsd.load()
+      }
+
+      async function detectFrame(video, model) {
+        const canvas = document.getElementById('canvas')
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+        const predictions = await model.detect(canvas)
+        predictions.forEach((pred) => {
+          const { bbox, class: className, score } = pred
+          const [x, y, w, h] = bbox
+
+          ctx.strokeStyle = 'red'
+          ctx.lineWidth = 2
+          ctx.strokeRect(x, y, w, h)
+          ctx.fillStyle = 'red'
+          ctx.fillText(`${className} (${(score * 100).toFixed(1)}%)`, x, y - 5)
+        })
+        const outputDiv = document.getElementById('output')
+        outputDiv.innerHTML = predictions
+          .map((pred) => `<p>${pred.class}: ${(pred.score * 100).toFixed(1)}%</p>`)
+          .join('')
+        requestAnimationFrame(() => detectFrame(video, model))
+      }
+    </script>
+  </body>
+</html>

@@ -1,0 +1,1279 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>浏览器视频流平面识别与3D物体放置</title>
+    <!-- Tailwind CSS - 用于快速构建响应式界面 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome - 提供图标支持 -->
+    <link
+      href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css"
+      rel="stylesheet"
+    />
+    <!-- TensorFlow.js - 用于在浏览器中运行机器学习模型 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <!-- Tensorflow-models/coco-ssd - 预训练的COCO SSD模型，用于对象检测 -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
+    <!-- Three.js - 用于3D物体渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/loaders/GLTFLoader.js"></script>
+
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              primary: '#0066cc',
+              secondary: '#00aaff',
+              accent: '#ff6600',
+              dark: '#1a1a2e',
+              light: '#f5f5f7',
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+            },
+          },
+        },
+      }
+    </script>
+
+    <style type="text/tailwindcss">
+      @layer utilities {
+        .content-auto {
+          content-visibility: auto;
+        }
+        .glass-effect {
+          background: rgba(255, 255, 255, 0.1);
+          backdrop-filter: blur(10px);
+          -webkit-backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .btn-primary {
+          @apply bg-primary hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50;
+        }
+        .btn-secondary {
+          @apply bg-secondary hover:bg-blue-400 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-300 focus:ring-opacity-50;
+        }
+        .btn-accent {
+          @apply bg-accent hover:bg-orange-500 text-white font-bold py-2 px-4 rounded-lg transition-all duration-300 transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-300 focus:ring-opacity-50;
+        }
+        .card {
+          @apply bg-white rounded-xl shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl;
+        }
+        .card-dark {
+          @apply bg-dark rounded-xl shadow-lg overflow-hidden transition-all duration-300 hover:shadow-xl;
+        }
+        .object-selector-item {
+          @apply cursor-pointer p-2 border border-gray-200 rounded-lg hover:border-primary hover:bg-blue-50 transition-all duration-200;
+        }
+        .object-selector-item.active {
+          @apply border-primary bg-blue-50;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+      <!-- Header -->
+      <header class="mb-8 text-center">
+        <h1 class="text-4xl font-bold text-dark mb-2">浏览器视频流平面识别与3D物体放置</h1>
+        <p class="text-gray-600">实时识别摄像头视频中的平面（桌子、地板等）并在上面放置3D物体</p>
+
+        <!-- 使用说明 -->
+        <div class="mt-4 bg-blue-50 border-l-4 border-blue-500 p-4 max-w-2xl mx-auto">
+          <div class="flex">
+            <div class="flex-shrink-0">
+              <i class="fa fa-info-circle text-blue-500"></i>
+            </div>
+            <div class="ml-3">
+              <p class="text-sm text-blue-700">
+                <strong>使用说明：</strong
+                >点击"开始识别"按钮，允许摄像头权限后，应用将实时识别并标注视频中的平面区域（如桌子、地板等）。
+                选择一个3D物体，然后点击识别到的平面区域即可放置物体。您可以通过右侧控制面板调整识别参数和标注样式。
+              </p>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      <!-- Main Content -->
+      <div class="flex flex-col lg:flex-row gap-6">
+        <!-- Video Section -->
+        <div class="lg:w-2/3">
+          <div class="card relative overflow-hidden">
+            <div class="aspect-w-16 aspect-h-9 bg-black relative">
+              <!-- Video Element -->
+              <video id="video" class="w-full h-full object-cover" autoplay playsinline></video>
+
+              <!-- Canvas for Drawing Annotations -->
+              <canvas
+                id="annotationCanvas"
+                class="absolute top-0 left-0 w-full h-full pointer-events-none"
+              ></canvas>
+
+              <!-- Three.js Canvas for 3D Objects -->
+              <canvas
+                id="threeCanvas"
+                class="absolute top-0 left-0 w-full h-full pointer-events-auto"
+              ></canvas>
+
+              <!-- Overlay for Status and Messages -->
+              <div class="absolute top-4 left-4 glass-effect text-white px-4 py-2 rounded-lg">
+                <div id="status" class="flex items-center">
+                  <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                  <span>未启动</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Video Controls -->
+            <div class="p-4 bg-gray-50 border-t border-gray-200">
+              <div class="flex flex-wrap gap-3">
+                <button id="startBtn" class="btn-primary flex items-center">
+                  <i class="fa fa-play mr-2"></i> 开始识别
+                </button>
+                <button id="stopBtn" class="btn-secondary flex items-center" disabled>
+                  <i class="fa fa-stop mr-2"></i> 停止识别
+                </button>
+                <button id="clearBtn" class="btn-accent flex items-center" disabled>
+                  <i class="fa fa-trash mr-2"></i> 清除物体
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Controls and Information Panel -->
+        <div class="lg:w-1/3">
+          <!-- Controls Card -->
+          <div class="card mb-6">
+            <div class="p-4 bg-gray-50 border-b border-gray-200">
+              <h3 class="text-xl font-semibold">识别控制</h3>
+            </div>
+            <div class="p-4">
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="modelSelect">
+                  选择模型
+                </label>
+                <select
+                  id="modelSelect"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="lite_mobilenet_v2">轻量级 MobileNet V2 (速度快)</option>
+                  <option value="mobilenet_v2">MobileNet V2 (更准确)</option>
+                  <option value="mobilenet_v1">MobileNet V1 (平衡)</option>
+                </select>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2"> 标注选项 </label>
+                <div class="space-y-2">
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showBorders" class="mr-2" checked />
+                    <label for="showBorders">显示边框</label>
+                  </div>
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showLabels" class="mr-2" checked />
+                    <label for="showLabels">显示标签</label>
+                  </div>
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showGrid" class="mr-2" />
+                    <label for="showGrid">显示网格</label>
+                  </div>
+                  <div class="flex items-center">
+                    <input type="checkbox" id="showDimensions" class="mr-2" />
+                    <label for="showDimensions">显示尺寸</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="confidenceSlider">
+                  置信度阈值: <span id="confidenceValue">0.5</span>
+                </label>
+                <input
+                  type="range"
+                  id="confidenceSlider"
+                  min="0.1"
+                  max="0.9"
+                  step="0.1"
+                  value="0.5"
+                  class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="maxBoxesInput">
+                  最大检测数量
+                </label>
+                <input
+                  type="number"
+                  id="maxBoxesInput"
+                  min="1"
+                  max="50"
+                  value="20"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            </div>
+          </div>
+
+          <!-- 3D Object Controls -->
+          <div class="card mb-6">
+            <div class="p-4 bg-gray-50 border-b border-gray-200">
+              <h3 class="text-xl font-semibold">3D物体控制</h3>
+            </div>
+            <div class="p-4">
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2"> 选择物体 </label>
+                <div class="grid grid-cols-3 gap-2" id="objectSelector">
+                  <div class="object-selector-item active" data-object="cube">
+                    <div class="flex flex-col items-center">
+                      <i class="fa fa-cube text-primary text-2xl mb-1"></i>
+                      <span class="text-xs">立方体</span>
+                    </div>
+                  </div>
+                  <div class="object-selector-item" data-object="sphere">
+                    <div class="flex flex-col items-center">
+                      <i class="fa fa-circle-o text-primary text-2xl mb-1"></i>
+                      <span class="text-xs">球体</span>
+                    </div>
+                  </div>
+                  <div class="object-selector-item" data-object="cone">
+                    <div class="flex flex-col items-center">
+                      <i class="fa fa-play text-primary text-2xl mb-1 transform -rotate-90"></i>
+                      <span class="text-xs">锥体</span>
+                    </div>
+                  </div>
+                  <div class="object-selector-item" data-object="cylinder">
+                    <div class="flex flex-col items-center">
+                      <i class="fa fa-circle text-primary text-2xl mb-1"></i>
+                      <span class="text-xs">圆柱体</span>
+                    </div>
+                  </div>
+                  <div class="object-selector-item" data-object="torus">
+                    <div class="flex flex-col items-center">
+                      <i class="fa fa-dot-circle-o text-primary text-2xl mb-1"></i>
+                      <span class="text-xs">圆环</span>
+                    </div>
+                  </div>
+                  <div class="object-selector-item" data-object="teapot">
+                    <div class="flex flex-col items-center">
+                      <i class="fa fa-coffee text-primary text-2xl mb-1"></i>
+                      <span class="text-xs">茶壶</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2" for="objectSizeSlider">
+                  物体大小: <span id="objectSizeValue">0.5</span>
+                </label>
+                <input
+                  type="range"
+                  id="objectSizeSlider"
+                  min="0.1"
+                  max="1.0"
+                  step="0.1"
+                  value="0.5"
+                  class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                />
+              </div>
+
+              <div class="mb-4">
+                <label class="block text-gray-700 text-sm font-bold mb-2"> 操作提示 </label>
+                <div class="bg-blue-50 p-3 rounded-lg text-xs text-blue-700">
+                  <p class="mb-1">
+                    <i class="fa fa-mouse-pointer mr-1"></i>
+                    <strong>旋转视图</strong>：按住鼠标左键并拖动
+                  </p>
+                  <p class="mb-1">
+                    <i class="fa fa-arrows mr-1"></i> <strong>平移视图</strong>：按住鼠标右键并拖动
+                  </p>
+                  <p class="mb-1">
+                    <i class="fa fa-arrows-v mr-1"></i>
+                    <strong>缩放视图</strong>：使用鼠标滚轮或触控板手势
+                  </p>
+                  <p class="mb-1">
+                    <i class="fa fa-hand-pointer-o mr-1"></i>
+                    <strong>选择物体</strong>：点击物体可选中（高亮显示）
+                  </p>
+                  <p>
+                    <i class="fa fa-times mr-1"></i> <strong>取消选择</strong>：按ESC键或点击空白处
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Information Card -->
+          <div class="card">
+            <div class="p-4 bg-gray-50 border-b border-gray-200">
+              <h3 class="text-xl font-semibold">识别信息</h3>
+            </div>
+            <div class="p-4">
+              <div id="detectionInfo" class="space-y-3">
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">帧率:</span>
+                  <span id="fpsCounter" class="font-mono">0 FPS</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">检测到的物体:</span>
+                  <span id="objectsCounter" class="font-mono">0</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">平面数量:</span>
+                  <span id="planesCounter" class="font-mono">0</span>
+                </div>
+                <div class="flex justify-between items-center">
+                  <span class="text-gray-600">3D物体数量:</span>
+                  <span id="objects3DCounter" class="font-mono">0</span>
+                </div>
+              </div>
+
+              <div class="mt-4">
+                <h4 class="font-medium text-gray-700 mb-2">检测到的物体列表:</h4>
+                <ul id="objectsList" class="max-h-40 overflow-y-auto text-sm">
+                  <li class="text-gray-500 italic">未检测到物体</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <footer class="mt-12 text-center text-gray-500 text-sm">
+        <p>© 2025 浏览器视频流平面识别与3D物体放置 | 使用 TensorFlow.js 和 Three.js 构建</p>
+      </footer>
+    </div>
+
+    <script>
+      // 全局变量声明
+      // 视频元素
+      let video
+      // 用于绘制标注的画布
+      let canvas
+      // 画布上下文
+      let ctx
+      // TensorFlow.js模型
+      let model
+      // 摄像头视频流
+      let stream
+      // 识别状态标志
+      let isDetecting = false
+      // 用于计算帧率的时间戳
+      let lastFrameTime = 0
+      // 帧数计数器
+      let frameCount = 0
+      // 帧率
+      let fps = 0
+      // 检测到的所有对象
+      let detectedObjects = []
+      // 过滤后的平面对象
+      let detectedPlanes = []
+      // 选中的平面
+      let selectedPlane = null
+
+      // Three.js相关变量
+      let scene
+      let camera
+      let renderer
+      let controls
+      let clock
+      let objects3D = []
+      let selectedObjectType = 'cube'
+      let objectSize = 0.5
+      let selectedObject = null
+      let objectPlacementMode = true // 是否处于物体放置模式
+      let isDragging = false // 是否正在拖动物体
+      let isRotating = false // 是否正在旋转物体
+      let dragStartPosition = new THREE.Vector2() // 拖动开始时的鼠标位置
+      let rotateStartPosition = new THREE.Vector2() // 旋转开始时的鼠标位置
+      let objectInitialPosition = new THREE.Vector3() // 物体初始位置
+      let objectInitialRotation = new THREE.Euler() // 物体初始旋转
+
+      // 相机参数（近似值，实际应用中可能需要校准）
+      const cameraParams = {
+        fov: 60,
+        aspect: 16 / 9,
+        near: 0.1,
+        far: 1000,
+        // 假设相机内参（近似值）
+        focalLength: 500,
+        principalPoint: { x: 0, y: 0 },
+      }
+
+      // DOM元素引用
+      const startBtn = document.getElementById('startBtn') // 开始识别按钮
+      const stopBtn = document.getElementById('stopBtn') // 停止识别按钮
+      const clearBtn = document.getElementById('clearBtn') // 清除物体按钮
+      const statusElement = document.getElementById('status') // 状态显示元素
+      const fpsCounter = document.getElementById('fpsCounter') // 帧率计数器
+      const objectsCounter = document.getElementById('objectsCounter') // 检测到的对象总数
+      const planesCounter = document.getElementById('planesCounter') // 检测到的平面数量
+      const objects3DCounter = document.getElementById('objects3DCounter') // 3D物体数量
+      const objectsList = document.getElementById('objectsList') // 检测到的对象列表
+      const modelSelect = document.getElementById('modelSelect') // 模型选择下拉框
+      const confidenceSlider = document.getElementById('confidenceSlider') // 置信度阈值滑块
+      const confidenceValue = document.getElementById('confidenceValue') // 置信度阈值显示
+      const maxBoxesInput = document.getElementById('maxBoxesInput') // 最大检测数量输入框
+      const showBordersCheckbox = document.getElementById('showBorders') // 显示边框复选框
+      const showLabelsCheckbox = document.getElementById('showLabels') // 显示标签复选框
+      const showGridCheckbox = document.getElementById('showGrid') // 显示网格复选框
+      const showDimensionsCheckbox = document.getElementById('showDimensions') // 显示尺寸复选框
+      const objectSelector = document.getElementById('objectSelector') // 物体选择器
+      const objectSizeSlider = document.getElementById('objectSizeSlider') // 物体大小滑块
+      const objectSizeValue = document.getElementById('objectSizeValue') // 物体大小显示
+
+      /**
+       * 应用初始化函数
+       * 初始化视频和画布元素，设置事件监听器，检查浏览器兼容性
+       */
+      async function init() {
+        try {
+          // 获取视频和画布元素
+          video = document.getElementById('video')
+          canvas = document.getElementById('annotationCanvas')
+          ctx = canvas.getContext('2d')
+
+          // 设置事件监听器
+          startBtn.addEventListener('click', startDetection)
+          stopBtn.addEventListener('click', stopDetection)
+          clearBtn.addEventListener('click', clearObjects)
+          confidenceSlider.addEventListener('input', updateConfidenceValue)
+          objectSizeSlider.addEventListener('input', updateObjectSize)
+
+          // 设置物体选择器事件
+          const objectItems = objectSelector.querySelectorAll('.object-selector-item')
+          objectItems.forEach((item) => {
+            item.addEventListener('click', () => {
+              // 移除其他项的active类
+              objectItems.forEach((i) => i.classList.remove('active'))
+              // 添加当前项的active类
+              item.classList.add('active')
+              // 更新选中的物体类型
+              selectedObjectType = item.dataset.object
+            })
+          })
+
+          // 初始化Three.js
+          initThreeJS()
+
+          // 设置视频点击事件
+          const videoContainer = document.querySelector('.aspect-w-16.aspect-h-9')
+          videoContainer.addEventListener('click', handleVideoClick)
+
+          // 检查浏览器是否支持摄像头访问
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error('浏览器不支持摄像头访问')
+          }
+
+          console.log('应用初始化完成')
+        } catch (error) {
+          console.error('初始化失败:', error)
+          alert(`初始化失败: ${error.message}`)
+        }
+      }
+
+      /**
+       * 初始化Three.js场景
+       */
+      function initThreeJS() {
+        try {
+          // 创建场景
+          scene = new THREE.Scene()
+
+          // 创建相机
+          camera = new THREE.PerspectiveCamera(
+            cameraParams.fov,
+            cameraParams.aspect,
+            cameraParams.near,
+            cameraParams.far,
+          )
+          camera.position.z = 5
+
+          // 创建渲染器
+          const threeCanvas = document.getElementById('threeCanvas')
+          renderer = new THREE.WebGLRenderer({
+            canvas: threeCanvas,
+            alpha: true,
+            antialias: true,
+          })
+
+          // 添加光源
+          const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)
+          scene.add(ambientLight)
+
+          const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8)
+          directionalLight.position.set(1, 1, 1)
+          scene.add(directionalLight)
+
+          // 添加环境光
+          const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.3)
+          scene.add(hemisphereLight)
+
+          // 初始化交互控制
+          initInteractionControls()
+
+          // 初始化时钟
+          clock = new THREE.Clock()
+
+          console.log('Three.js初始化完成')
+        } catch (error) {
+          console.error('Three.js初始化失败:', error)
+          alert(`Three.js初始化失败: ${error.message}`)
+        }
+      }
+
+      /**
+       * 初始化交互控制
+       */
+      function initInteractionControls() {
+        // 创建OrbitControls
+        controls = new THREE.OrbitControls(camera, renderer.domElement)
+
+        // 设置OrbitControls参数
+        controls.enableDamping = true
+        controls.dampingFactor = 0.05
+        controls.screenSpacePanning = false
+        controls.minDistance = 0.1
+        controls.maxDistance = 100
+        controls.maxPolarAngle = Math.PI / 2
+
+        // 添加鼠标事件
+        const canvas = renderer.domElement
+
+        // 鼠标按下事件
+        canvas.addEventListener('mousedown', onMouseDown)
+
+        // 添加键盘事件
+        window.addEventListener('keydown', onKeyDown)
+      }
+
+      /**
+       * 处理鼠标按下事件
+       * @param {Event} event - 鼠标事件
+       */
+      function onMouseDown(event) {
+        if (!isDetecting) return
+
+        // 获取鼠标位置
+        const mousePosition = getMousePosition(event)
+
+        // 射线检测
+        const raycaster = new THREE.Raycaster()
+        raycaster.setFromCamera(mousePosition, camera)
+
+        // 检测与3D物体的交点
+        const intersects = raycaster.intersectObjects(objects3D.map((obj) => obj.mesh))
+
+        if (intersects.length > 0) {
+          // 选中第一个相交的物体
+          const selectedMesh = intersects[0].object
+          selectedObject = objects3D.find((obj) => obj.mesh === selectedMesh)
+
+          // 高亮显示选中的物体
+          highlightSelectedObject(true)
+
+          // 禁用物体放置模式
+          objectPlacementMode = false
+        } else {
+          // 如果没有选中任何物体，取消选择
+          selectedObject = null
+          highlightSelectedObject(false)
+
+          // 进入物体放置模式
+          objectPlacementMode = true
+        }
+      }
+
+      /**
+       * 处理键盘按下事件
+       * @param {Event} event - 键盘事件
+       */
+      function onKeyDown(event) {
+        // ESC键取消选择
+        if (event.key === 'Escape') {
+          selectedObject = null
+          highlightSelectedObject(false)
+          objectPlacementMode = true
+        }
+      }
+
+      /**
+       * 获取鼠标在NDC坐标中的位置
+       * @param {Event} event - 鼠标事件
+       * @returns {THREE.Vector2} - 鼠标位置
+       */
+      function getMousePosition(event) {
+        const rect = renderer.domElement.getBoundingClientRect()
+        return new THREE.Vector2(
+          ((event.clientX - rect.left) / rect.width) * 2 - 1,
+          -((event.clientY - rect.top) / rect.height) * 2 + 1,
+        )
+      }
+
+      /**
+       * 高亮显示选中的物体
+       * @param {boolean} highlight - 是否高亮
+       */
+      function highlightSelectedObject(highlight) {
+        if (!selectedObject) return
+
+        const material = selectedObject.mesh.material
+
+        if (highlight) {
+          // 保存原始颜色
+          selectedObject.originalColor = material.color.clone()
+          // 设置高亮颜色
+          material.color.set(0xff6600)
+        } else {
+          // 恢复原始颜色
+          if (selectedObject.originalColor) {
+            material.color.copy(selectedObject.originalColor)
+          }
+        }
+      }
+
+      /**
+       * 处理画布点击事件
+       * @param {Event} event - 点击事件
+       */
+      function onCanvasClick(event) {
+        // 已在initInteractionControls中实现
+      }
+
+      /**
+       * 更新置信度阈值显示
+       * 当滑块值改变时，更新显示的置信度值
+       */
+      function updateConfidenceValue() {
+        confidenceValue.textContent = confidenceSlider.value
+      }
+
+      /**
+       * 更新物体大小
+       */
+      function updateObjectSize() {
+        objectSize = parseFloat(objectSizeSlider.value)
+        objectSizeValue.textContent = objectSize.toFixed(1)
+      }
+
+      /**
+       * 开始对象检测
+       * 加载模型，获取摄像头权限，启动视频流，开始检测循环
+       */
+      async function startDetection() {
+        try {
+          // 如果已经在检测中，则返回
+          if (isDetecting) return
+
+          // 更新UI状态
+          startBtn.disabled = true
+          stopBtn.disabled = false
+          clearBtn.disabled = false
+          statusElement.innerHTML =
+            '<span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span><span>加载模型中...</span>'
+
+          // 加载COCO-SSD模型
+          const modelType = modelSelect.value
+          model = await cocoSsd.load({ base: modelType })
+          console.log(`模型 ${modelType} 加载完成`)
+
+          // 获取摄像头视频流
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              facingMode: 'environment', // 使用后置摄像头
+              width: { ideal: 1280 }, // 理想宽度
+              height: { ideal: 720 }, // 理想高度
+            },
+            audio: false, // 不需要音频
+          })
+
+          // 设置视频源
+          video.srcObject = stream
+
+          // 等待视频元数据加载完成
+          await new Promise((resolve) => {
+            video.onloadedmetadata = () => {
+              resolve()
+            }
+          })
+
+          // 设置画布尺寸与视频一致
+          canvas.width = video.videoWidth
+          canvas.height = video.videoHeight
+
+          // 更新Three.js渲染器尺寸
+          if (renderer) {
+            renderer.setSize(video.videoWidth, video.videoHeight)
+            // 更新相机 aspect
+            camera.aspect = video.videoWidth / video.videoHeight
+            camera.updateProjectionMatrix()
+          }
+
+          // 更新UI状态
+          statusElement.innerHTML =
+            '<span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span><span>正在识别...</span>'
+
+          // 开始检测循环
+          isDetecting = true
+          lastFrameTime = performance.now()
+          frameCount = 0
+
+          // 启动检测
+          detectFrame()
+
+          // 启动Three.js动画循环
+          animate()
+        } catch (error) {
+          console.error('启动识别失败:', error)
+          alert(`启动识别失败: ${error.message}`)
+          resetUI()
+        }
+      }
+
+      /**
+       * 停止对象检测
+       * 停止检测循环，关闭摄像头流，清除画布，重置UI
+       */
+      function stopDetection() {
+        if (!isDetecting) return
+
+        // 停止检测循环
+        isDetecting = false
+
+        // 停止摄像头流
+        if (stream) {
+          stream.getTracks().forEach((track) => track.stop())
+        }
+
+        // 清除画布
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+        // 清除Three.js场景
+        clearObjects()
+
+        // 重置UI
+        resetUI()
+
+        console.log('识别已停止')
+      }
+
+      /**
+       * 清除所有3D物体
+       */
+      function clearObjects() {
+        // 从场景中移除所有3D物体
+        objects3D.forEach((obj) => {
+          if (obj.mesh) {
+            scene.remove(obj.mesh)
+          }
+        })
+
+        // 清空数组
+        objects3D = []
+
+        // 取消选择
+        selectedObject = null
+        transformControls.detach()
+        objectPlacementMode = true
+
+        // 更新计数器
+        objects3DCounter.textContent = '0'
+      }
+
+      /**
+       * 重置UI到初始状态
+       * 重置按钮状态、状态显示、计数器和检测结果
+       */
+      function resetUI() {
+        startBtn.disabled = false
+        stopBtn.disabled = true
+        clearBtn.disabled = true
+        statusElement.innerHTML =
+          '<span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span><span>未启动</span>'
+        fpsCounter.textContent = '0 FPS'
+        objectsCounter.textContent = '0'
+        planesCounter.textContent = '0'
+        objects3DCounter.textContent = '0'
+        objectsList.innerHTML = '<li class="text-gray-500 italic">未检测到物体</li>'
+        detectedObjects = []
+        detectedPlanes = []
+        selectedPlane = null
+      }
+
+      /**
+       * 单帧检测函数
+       * 计算帧率，检测对象，过滤平面，更新UI和绘制标注
+       */
+      async function detectFrame() {
+        if (!isDetecting) return
+
+        try {
+          // 计算帧率
+          const now = performance.now()
+          frameCount++
+          if (now - lastFrameTime > 1000) {
+            fps = Math.round((frameCount * 1000) / (now - lastFrameTime))
+            fpsCounter.textContent = `${fps} FPS`
+            lastFrameTime = now
+            frameCount = 0
+          }
+
+          // 清除画布
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+          // 检测对象
+          const confidenceThreshold = parseFloat(confidenceSlider.value)
+          const maxBoxes = parseInt(maxBoxesInput.value)
+
+          // 使用模型检测视频中的对象
+          const predictions = await model.detect(video, maxBoxes, confidenceThreshold)
+
+          // 过滤和处理预测结果
+          detectedObjects = predictions
+          detectedPlanes = filterPlanes(predictions)
+
+          // 更新计数器
+          objectsCounter.textContent = detectedObjects.length
+          planesCounter.textContent = detectedPlanes.length
+
+          // 更新对象列表
+          updateObjectsList()
+
+          // 绘制标注
+          drawAnnotations()
+        } catch (error) {
+          console.error('帧检测错误:', error)
+        }
+
+        // 继续检测循环
+        if (isDetecting) {
+          requestAnimationFrame(detectFrame)
+        }
+      }
+
+      /**
+       * Three.js动画循环
+       */
+      function animate() {
+        if (!isDetecting) return
+
+        requestAnimationFrame(animate)
+
+        // 更新控制器
+        if (controls) {
+          controls.update()
+        }
+
+        // 渲染场景
+        if (renderer) {
+          renderer.render(scene, camera)
+        }
+      }
+
+      /**
+       * 从预测结果中过滤平面类对象
+       * @param {Array} predictions - 模型预测的所有对象
+       * @returns {Array} - 过滤后的平面类对象
+       */
+      function filterPlanes(predictions) {
+        // 基于COCO数据集定义平面类对象
+        const planeClasses = ['dining table', 'table', 'desk', 'floor', 'coffee table', 'counter']
+
+        // 过滤预测结果，只保留平面类对象
+        return predictions.filter((prediction) =>
+          planeClasses.includes(prediction.class.toLowerCase()),
+        )
+      }
+
+      /**
+       * 更新对象列表UI
+       * 按类别统计检测到的对象，并更新列表显示
+       */
+      function updateObjectsList() {
+        if (detectedObjects.length === 0) {
+          objectsList.innerHTML = '<li class="text-gray-500 italic">未检测到物体</li>'
+          return
+        }
+
+        // 按类别分组对象
+        const objectsByClass = {}
+        detectedObjects.forEach((obj) => {
+          if (!objectsByClass[obj.class]) {
+            objectsByClass[obj.class] = 0
+          }
+          objectsByClass[obj.class]++
+        })
+
+        // 创建列表项
+        objectsList.innerHTML = ''
+        Object.keys(objectsByClass).forEach((className) => {
+          const count = objectsByClass[className]
+          const li = document.createElement('li')
+          li.className = 'flex justify-between items-center py-1 border-b border-gray-100'
+          li.innerHTML = `
+          <span>${className}</span>
+          <span class="bg-gray-200 text-gray-700 px-2 py-0.5 rounded-full text-xs">${count}</span>
+        `
+          objectsList.appendChild(li)
+        })
+      }
+
+      /**
+       * 在画布上绘制标注
+       * 根据用户选择的标注选项，绘制边框、标签、网格和尺寸信息
+       */
+      function drawAnnotations() {
+        // 如果没有选择任何标注选项，则返回
+        if (
+          !showBordersCheckbox.checked &&
+          !showLabelsCheckbox.checked &&
+          !showGridCheckbox.checked &&
+          !showDimensionsCheckbox.checked
+        ) {
+          return
+        }
+
+        // 绘制平面标注
+        detectedPlanes.forEach((plane, index) => {
+          const { bbox, class: className } = plane
+          const [x, y, width, height] = bbox
+
+          // 为每个平面生成唯一的颜色
+          const hue = (index * 137) % 360 // 使用黄金角算法获取不同的颜色
+          const color = `hsl(${hue}, 70%, 50%)`
+
+          // 如果是选中的平面，使用不同的颜色
+          const isSelected =
+            selectedPlane &&
+            plane.bbox[0] === selectedPlane.bbox[0] &&
+            plane.bbox[1] === selectedPlane.bbox[1] &&
+            plane.bbox[2] === selectedPlane.bbox[2] &&
+            plane.bbox[3] === selectedPlane.bbox[3]
+
+          const borderColor = isSelected ? '#ff6600' : color
+          const borderWidth = isSelected ? 4 : 3
+
+          // 绘制边框
+          if (showBordersCheckbox.checked) {
+            ctx.strokeStyle = borderColor
+            ctx.lineWidth = borderWidth
+            ctx.strokeRect(x, y, width, height)
+          }
+
+          // 绘制标签
+          if (showLabelsCheckbox.checked) {
+            ctx.fillStyle = borderColor
+            ctx.fillRect(x, y - 20, 100, 20)
+            ctx.fillStyle = 'white'
+            ctx.font = '14px Arial'
+            ctx.textAlign = 'center'
+            ctx.textBaseline = 'middle'
+            ctx.fillText(className, x + 50, y - 10)
+          }
+
+          // 绘制网格
+          if (showGridCheckbox.checked) {
+            drawGrid(x, y, width, height, color, 20)
+          }
+
+          // 绘制尺寸
+          if (showDimensionsCheckbox.checked) {
+            drawDimensions(x, y, width, height, color)
+          }
+        })
+      }
+
+      /**
+       * 在平面上绘制网格
+       * @param {number} x - 平面左上角x坐标
+       * @param {number} y - 平面左上角y坐标
+       * @param {number} width - 平面宽度
+       * @param {number} height - 平面高度
+       * @param {string} color - 网格颜色
+       * @param {number} gridSize - 网格大小
+       */
+      function drawGrid(x, y, width, height, color, gridSize) {
+        ctx.strokeStyle = color
+        ctx.lineWidth = 1
+        ctx.globalAlpha = 0.5 // 设置透明度
+
+        // 绘制垂直线
+        for (let i = 0; i <= width; i += gridSize) {
+          ctx.beginPath()
+          ctx.moveTo(x + i, y)
+          ctx.lineTo(x + i, y + height)
+          ctx.stroke()
+        }
+
+        // 绘制水平线
+        for (let i = 0; i <= height; i += gridSize) {
+          ctx.beginPath()
+          ctx.moveTo(x, y + i)
+          ctx.lineTo(x + width, y + i)
+          ctx.stroke()
+        }
+
+        ctx.globalAlpha = 1.0 // 恢复透明度
+      }
+
+      /**
+       * 绘制平面的尺寸信息
+       * @param {number} x - 平面左上角x坐标
+       * @param {number} y - 平面左上角y坐标
+       * @param {number} width - 平面宽度
+       * @param {number} height - 平面高度
+       * @param {string} color - 尺寸文本背景色
+       */
+      function drawDimensions(x, y, width, height, color) {
+        const textSize = 14
+        const padding = 5
+
+        ctx.fillStyle = color
+        ctx.font = `${textSize}px Arial`
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+
+        // 绘制宽度尺寸
+        const widthText = `${Math.round(width)}px`
+        const widthTextWidth = ctx.measureText(widthText).width
+
+        ctx.fillRect(
+          x + width / 2 - widthTextWidth / 2 - padding,
+          y - textSize - padding * 2,
+          widthTextWidth + padding * 2,
+          textSize + padding * 2,
+        )
+
+        ctx.fillStyle = 'white'
+        ctx.fillText(widthText, x + width / 2, y - textSize / 2 - padding)
+
+        // 绘制高度尺寸
+        const heightText = `${Math.round(height)}px`
+        const heightTextWidth = ctx.measureText(heightText).width
+
+        ctx.fillStyle = color
+        ctx.fillRect(
+          x - heightTextWidth - padding * 2,
+          y + height / 2 - textSize / 2 - padding,
+          heightTextWidth + padding * 2,
+          textSize + padding * 2,
+        )
+
+        ctx.fillStyle = 'white'
+        ctx.fillText(heightText, x - heightTextWidth / 2 - padding, y + height / 2)
+      }
+
+      /**
+       * 处理视频点击事件
+       * @param {Event} event - 点击事件
+       */
+      function handleVideoClick(event) {
+        if (!isDetecting || detectedPlanes.length === 0) return
+
+        // 获取点击位置相对于视频的坐标
+        const rect = video.getBoundingClientRect()
+        const x = event.clientX - rect.left
+        const y = event.clientY - rect.top
+
+        // 检查点击是否在某个平面内
+        let clickedPlane = null
+        for (const plane of detectedPlanes) {
+          const [px, py, pw, ph] = plane.bbox
+          if (x >= px && x <= px + pw && y >= py && y <= py + ph) {
+            clickedPlane = plane
+            break
+          }
+        }
+
+        if (clickedPlane) {
+          // 更新选中的平面
+          selectedPlane = clickedPlane
+
+          // 在选中的平面上放置3D物体
+          placeObjectOnPlane(clickedPlane, x, y)
+        }
+      }
+
+      /**
+       * 在平面上放置3D物体
+       * @param {Object} plane - 平面对象
+       * @param {number} clickX - 点击位置的X坐标
+       * @param {number} clickY - 点击位置的Y坐标
+       */
+      function placeObjectOnPlane(plane, clickX, clickY) {
+        if (!scene || !camera || !objectPlacementMode) return
+
+        // 计算点击位置在视频中的坐标（归一化坐标）
+        const videoWidth = video.videoWidth
+        const videoHeight = video.videoHeight
+        const ndcX = (clickX / videoWidth) * 2 - 1
+        const ndcY = -(clickY / videoHeight) * 2 + 1
+
+        // 创建射线
+        const raycaster = new THREE.Raycaster()
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera)
+
+        // 估算平面在3D空间中的位置和尺寸
+        const planeSize = estimatePlaneSize(plane)
+        const planePosition = estimatePlanePosition(plane, planeSize)
+
+        // 计算射线与平面的交点
+        // 假设平面是水平的（y = planePosition.y）
+        const planeY = planePosition.y
+        const t = (planeY - camera.position.y) / raycaster.ray.direction.y
+        const intersectionPoint = raycaster.ray.origin
+          .clone()
+          .add(raycaster.ray.direction.clone().multiplyScalar(t))
+
+        // 计算物体在平面上的位置
+        const objectX = intersectionPoint.x
+        const objectZ = intersectionPoint.z
+        const objectY = planeY + objectSize / 2 // 物体底部与平面接触
+
+        // 创建3D物体
+        const object = createObject(selectedObjectType, objectSize)
+        if (!object) return
+
+        // 设置物体位置
+        object.mesh.position.set(objectX, objectY, objectZ)
+
+        // 将物体添加到场景
+        scene.add(object.mesh)
+        objects3D.push(object)
+
+        // 更新3D物体计数器
+        objects3DCounter.textContent = objects3D.length
+      }
+
+      /**
+       * 估算平面的尺寸
+       * @param {Object} plane - 平面对象
+       * @returns {Object} - 包含宽度和深度的尺寸对象
+       */
+      function estimatePlaneSize(plane) {
+        // 这里使用简化的估算方法
+        // 实际应用中可能需要使用更复杂的算法，如基于已知物体大小的参照
+        const [px, py, pw, ph] = plane.bbox
+        const videoWidth = video.videoWidth
+        const videoHeight = video.videoHeight
+
+        // 假设平面宽度为1米（可以根据实际情况调整）
+        const estimatedWidth = 1.0
+
+        // 根据平面在视频中的宽高比计算深度
+        const aspectRatio = pw / ph
+        const estimatedDepth = estimatedWidth / aspectRatio
+
+        return {
+          width: estimatedWidth,
+          depth: estimatedDepth,
+        }
+      }
+
+      /**
+       * 估算平面的位置
+       * @param {Object} plane - 平面对象
+       * @param {Object} planeSize - 平面尺寸
+       * @returns {THREE.Vector3} - 平面的3D位置
+       */
+      function estimatePlanePosition(plane, planeSize) {
+        // 这里使用简化的估算方法
+        // 实际应用中可能需要使用更复杂的算法，如基于相机内参的计算
+        const [px, py, pw, ph] = plane.bbox
+        const videoWidth = video.videoWidth
+        const videoHeight = video.videoHeight
+
+        // 估算平面到相机的距离
+        // 这里使用简化的方法，实际应用中可能需要更复杂的深度估算
+        // 根据平面在图像中的大小估算距离
+        // 假设平面的实际宽度为1米
+        const estimatedDistance = 2.0 // 假设平面距离相机2米
+
+        // 计算平面中心点在图像中的坐标（像素坐标）
+        const centerX = px + pw / 2
+        const centerY = py + ph / 2
+
+        // 将像素坐标转换为NDC坐标（归一化设备坐标）
+        const ndcX = (centerX / videoWidth) * 2 - 1
+        const ndcY = -(centerY / videoHeight) * 2 + 1
+
+        // 创建射线
+        const raycaster = new THREE.Raycaster()
+        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera)
+
+        // 计算射线与z = -estimatedDistance平面的交点
+        const planeZ = -estimatedDistance
+        const t = (planeZ - camera.position.z) / raycaster.ray.direction.z
+        const intersectionPoint = raycaster.ray.origin
+          .clone()
+          .add(raycaster.ray.direction.clone().multiplyScalar(t))
+
+        return intersectionPoint
+      }
+
+      /**
+       * 创建3D物体
+       * @param {string} type - 物体类型
+       * @param {number} size - 物体大小
+       * @returns {Object} - 包含mesh和可能的其他属性的物体对象
+       */
+      function createObject(type, size) {
+        let geometry
+        let material
+        let mesh
+
+        // 根据类型创建几何体
+        switch (type) {
+          case 'cube':
+            geometry = new THREE.BoxGeometry(size, size, size)
+            break
+          case 'sphere':
+            geometry = new THREE.SphereGeometry(size / 2, 32, 32)
+            break
+          case 'cone':
+            geometry = new THREE.ConeGeometry(size / 2, size, 32)
+            break
+          case 'cylinder':
+            geometry = new THREE.CylinderGeometry(size / 4, size / 4, size / 2, 32)
+            break
+          case 'torus':
+            geometry = new THREE.TorusGeometry(size / 4, size / 8, 16, 100)
+            break
+          case 'teapot':
+            // 使用简化的茶壶模型（实际Three.js中没有内置茶壶几何体）
+            geometry = new THREE.CylinderGeometry(size / 4, size / 4, size / 2, 32)
+            break
+          default:
+            geometry = new THREE.BoxGeometry(size, size, size)
+        }
+
+        // 创建材质
+        material = new THREE.MeshStandardMaterial({
+          color: 0x0066cc,
+          metalness: 0.3,
+          roughness: 0.7,
+        })
+
+        // 创建网格
+        mesh = new THREE.Mesh(geometry, material)
+
+        return {
+          mesh,
+          type,
+        }
+      }
+
+      /**
+       * 页面加载完成后初始化应用
+       */
+      window.addEventListener('load', init)
+    </script>
+  </body>
+</html>

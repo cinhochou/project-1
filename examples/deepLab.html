@@ -1,0 +1,194 @@
+<!doctype html>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1" charset="utf-8" />
+    <title>平面类物体实时分割</title>
+  </head>
+  <body>
+    <video id="video" width="640" height="480" autoplay muted playsinline></video>
+    <canvas
+      id="canvas"
+      width="640"
+      height="480"
+      style="position: absolute; top: 0; left: 0"
+    ></canvas>
+    <div id="output" style="position: absolute; top: 500px; font-size: 18px"></div>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/deeplab"></script>
+    <script>
+      // 修正后的ADE20K类别（重点保留平面类，移除拼写错误）
+      const ADE20K_CLASSES = [
+        'void',
+        'wall',
+        'building',
+        'sky',
+        'floor',
+        'tree',
+        'ceiling',
+        'road',
+        'bed',
+        'windowpane',
+        'grass',
+        'cabinet',
+        'sidewalk',
+        'person',
+        'earth',
+        'door',
+        'table',
+        'mountain',
+        'plant',
+        'curtain',
+        'chair',
+        'car',
+        'water',
+        'painting',
+        'sofa',
+        'shelf',
+        'house',
+        'sea',
+        'mirror',
+        'rug',
+        'field',
+        'armchair',
+        'seat',
+        'fence',
+        'desk',
+        'rock',
+        'wardrobe',
+        'lamp',
+        'bathtub',
+        'railing',
+      ]
+
+      // 你关注的平面类物体（与原始需求一致）
+      const targetClasses = ['floor', 'table', 'wall', 'chair']
+
+      // 缓存DOM元素（避免重复查询）
+      const video = document.getElementById('video')
+      const canvas = document.getElementById('canvas')
+      const ctx = canvas.getContext('2d')
+      const output = document.getElementById('output')
+
+      let model
+      let lastProcessTime = 0
+      const processInterval = 33.33 // 每33.33ms处理一帧（平衡速度与流畅度）
+
+      async function loadModel() {
+        try {
+          output.textContent = '正在加载模型...'
+          model = await deeplab.load({
+            base: 'ade20k',
+            quantizationBytes: 1, // 1字节量化减小计算量
+          })
+          output.textContent = '模型加载完成，开始检测平面类物体...'
+        } catch (err) {
+          output.textContent = '模型加载失败: ' + err.message
+          console.error('模型加载错误:', err)
+        }
+      }
+
+      async function startCamera() {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 480, max: 640 },
+              height: { ideal: 360, max: 480 },
+              frameRate: { ideal: 30 },
+            },
+          })
+          video.srcObject = stream
+          return new Promise((resolve) => {
+            video.onloadedmetadata = () => resolve()
+          })
+        } catch (err) {
+          output.textContent = '摄像头访问失败: ' + err.message
+          console.error('摄像头错误:', err)
+          throw err
+        }
+      }
+
+      // 高效绘制分割结果（优化像素映射逻辑）
+      function drawMasks(segmentationResult, videoWidth, videoHeight) {
+        // 绘制原始视频
+        ctx.drawImage(video, 0, 0, videoWidth, videoHeight)
+
+        const { segmentationMap, width: segWidth, height: segHeight } = segmentationResult
+        const imageData = ctx.createImageData(videoWidth, videoHeight)
+
+        // 预计算缩放比例（避免循环内重复计算）
+        const scaleX = segWidth / videoWidth
+        const scaleY = segHeight / videoHeight
+
+        // 记录检测到的目标类别
+        const detected = new Set()
+
+        // 遍历视频像素（优化循环逻辑）
+        for (let y = 0; y < videoHeight; y++) {
+          // 预计算当前行的偏移量（减少数组访问开销）
+          const rowOffset = y * videoWidth * 4
+          // 预计算分割图的Y坐标
+          const segY = Math.min(Math.floor(y * scaleY), segHeight - 1)
+
+          for (let x = 0; x < videoWidth; x++) {
+            // 预计算分割图的X坐标
+            const segX = Math.min(Math.floor(x * scaleX), segWidth - 1)
+            // 计算分割图索引
+            const segIndex = segY * segWidth + segX
+            const classId = segmentationMap[segIndex]
+            const className = ADE20K_CLASSES[classId]?.trim()
+
+            // 检查是否为目标类别
+            if (className && targetClasses.includes(className)) {
+              detected.add(className)
+              // 半透明绿色（R=0, G=255, B=0, A=128）
+              const pixelIndex = rowOffset + x * 4
+              imageData.data[pixelIndex] = 0
+              imageData.data[pixelIndex + 1] = 255
+              imageData.data[pixelIndex + 2] = 0
+              imageData.data[pixelIndex + 3] = 128
+            }
+          }
+        }
+
+        // 叠加掩码
+        ctx.putImageData(imageData, 0, 0)
+
+        // 显示检测结果
+        output.textContent = detected.size
+          ? `识别到平面: ${Array.from(detected).join(', ')}`
+          : '未检测到目标平面'
+      }
+
+      // 处理视频帧（控制频率，避免卡顿）
+      async function processFrame() {
+        if (!model || video.readyState !== video.HAVE_ENOUGH_DATA) {
+          requestAnimationFrame(processFrame)
+          return
+        }
+
+        const now = performance.now()
+        // 控制处理频率，避免过于频繁
+        if (now - lastProcessTime > processInterval) {
+          try {
+            const result = await model.segment(video)
+            drawMasks(result, video.videoWidth, video.videoHeight)
+            lastProcessTime = now
+          } catch (err) {
+            console.warn('处理帧错误:', err)
+          }
+        }
+
+        requestAnimationFrame(processFrame)
+      }
+
+      // 初始化流程
+      async function init() {
+        await startCamera()
+        await loadModel()
+        processFrame()
+      }
+
+      window.onload = init
+    </script>
+  </body>
+</html>
