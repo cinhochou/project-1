@@ -7,6 +7,29 @@
 <!-- three.js library -->
 <script src="bulid/three.js"></script>
 <script src="bulid/stats.js"></script>
+<!-- OrbitControls -->
+<!-- <script>
+  // 简化的非模块版本OrbitControls
+  ;(function () {
+    if (typeof THREE === 'undefined') return
+
+    THREE.OrbitControls = function (object, domElement) {
+      this.object = object
+      this.domElement = domElement
+
+      // 简化的控制逻辑
+      this.enableDamping = true
+      this.dampingFactor = 0.05
+
+      this.update = function () {
+        // 简化的更新逻辑
+        if (this.enableDamping) {
+          // 阻尼效果
+        }
+      }
+    }
+  })()
+</script> -->
 <!-- ar.js -->
 <script src="bulid/ar.js"></script>
 <script src="bulid/MTLLoader.js"></script>
@@ -81,6 +104,9 @@
     // 初始化摄像机位置(0，0，0)
     camera = new THREE.Camera()
     scene.add(camera)
+    // const controls = new THREE.OrbitControls(camera, renderer.domElement)
+    // controls.enableDamping = true // 启用阻尼效果
+    // controls.dampingFactor = 0.05 // 阻尼系数
 
     // handle arToolkitSource
     var arToolkitSource = new THREEx.ArToolkitSource({})
@@ -153,6 +179,7 @@
     requestAnimationFrame(function animate(nowMsec) {
       // keep looping
       requestAnimationFrame(animate)
+      // controls.update()
       //        stats.update();
       // measure time
       lastTimeMsec = lastTimeMsec || nowMsec - 1000 / 60
@@ -297,8 +324,69 @@
       }
     }
 
+    // 修改handleTouchMove函数中的obj为mesh
+    function handleMeshTouchMove(e) {
+      e.preventDefault() // 防止页面滚动
+      if (e.touches.length === 2 && initialTouches && mesh) {
+        // 双指处理：缩放和旋转
+        const currentTouches = [
+          { x: e.touches[0].clientX, y: e.touches[0].clientY },
+          { x: e.touches[1].clientX, y: e.touches[1].clientY },
+        ]
+
+        // 计算当前距离和角度
+        const dx = currentTouches[1].x - currentTouches[0].x
+        const dy = currentTouches[1].y - currentTouches[0].y
+        const currentScale = Math.sqrt(dx * dx + dy * dy)
+        const currentRotation = Math.atan2(dy, dx)
+
+        // 处理缩放
+        if (currentScale > 0 && initialScale > 0) {
+          const scaleChange = currentScale / initialScale
+
+          // 限制缩放范围，防止模型过大或过小
+          const minScale = 0.001
+          const maxScale = 5
+          const newScaleX = mesh.scale.x * scaleChange
+          const newScaleY = mesh.scale.y * scaleChange
+          const newScaleZ = mesh.scale.z * scaleChange
+
+          if (newScaleX >= minScale && newScaleX <= maxScale) {
+            mesh.scale.set(newScaleX, newScaleY, newScaleZ)
+          }
+
+          // 更新初始值以支持连续缩放
+          initialScale = currentScale
+        }
+
+        // 处理旋转
+        const rotationDelta = currentRotation - initialRotation
+        mesh.rotation.y += rotationDelta
+
+        // 更新初始旋转值以支持连续旋转
+        initialRotation = currentRotation
+      } else if (e.touches.length === 1 && isSingleTouch && mesh && previousTouchPosition) {
+        // 单指处理：旋转模型
+        const currentTouch = {
+          x: e.touches[0].clientX,
+          y: e.touches[0].clientY,
+        }
+
+        // 计算移动差值
+        const deltaX = currentTouch.x - previousTouchPosition.x
+        const deltaY = currentTouch.y - previousTouchPosition.y
+
+        // 根据水平移动旋转模型（调整系数以改变灵敏度）
+        mesh.rotation.y += deltaX * 0.01
+        mesh.rotation.x += deltaY * 0.01
+
+        // 更新位置
+        previousTouchPosition = currentTouch
+      }
+    }
     // 添加触摸事件监听器
     document.addEventListener('touchstart', handleTouchStart, { passive: false })
-    document.addEventListener('touchmove', handleTouchMove, { passive: false })
+    //document.addEventListener('touchmove', handleTouchMove, { passive: false })
+    document.addEventListener('touchmove', handleMeshTouchMove, { passive: false })
   </script>
 </body>
