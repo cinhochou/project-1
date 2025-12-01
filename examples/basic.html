@@ -7,29 +7,6 @@
 <!-- three.js library -->
 <script src="bulid/three.js"></script>
 <script src="bulid/stats.js"></script>
-<!-- OrbitControls -->
-<!-- <script>
-  // 简化的非模块版本OrbitControls
-  ;(function () {
-    if (typeof THREE === 'undefined') return
-
-    THREE.OrbitControls = function (object, domElement) {
-      this.object = object
-      this.domElement = domElement
-
-      // 简化的控制逻辑
-      this.enableDamping = true
-      this.dampingFactor = 0.05
-
-      this.update = function () {
-        // 简化的更新逻辑
-        if (this.enableDamping) {
-          // 阻尼效果
-        }
-      }
-    }
-  })()
-</script> -->
 <!-- ar.js -->
 <script src="bulid/ar.js"></script>
 <script src="bulid/MTLLoader.js"></script>
@@ -104,9 +81,6 @@
     // 初始化摄像机位置(0，0，0)
     camera = new THREE.Camera()
     scene.add(camera)
-    // const controls = new THREE.OrbitControls(camera, renderer.domElement)
-    // controls.enableDamping = true // 启用阻尼效果
-    // controls.dampingFactor = 0.05 // 阻尼系数
 
     // handle arToolkitSource
     var arToolkitSource = new THREEx.ArToolkitSource({})
@@ -179,7 +153,6 @@
     requestAnimationFrame(function animate(nowMsec) {
       // keep looping
       requestAnimationFrame(animate)
-      // controls.update()
       //        stats.update();
       // measure time
       lastTimeMsec = lastTimeMsec || nowMsec - 1000 / 60
