@@ -30,7 +30,7 @@ const ydoc = new Y.Doc()
 
 const provider = new WebrtcProvider('quill-demo-room', ydoc, {
   signaling: [
-    'ws://172.26.246.252:4444', //npx y-webrtc-signaling命令部署本地信令服务器
+    'ws://localhost:4444', //npx y-webrtc-signaling命令部署本地信令服务器
   ],
 })
 
