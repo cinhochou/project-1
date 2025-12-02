@@ -30,6 +30,9 @@
      
     <div id="Stats-output"></div>
   </div> -->
+  <div style="position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1">
+    <div id="position-output"></div>
+  </div>
   <script>
     // var obj
     // //fps监测
@@ -73,6 +76,11 @@
     light.position.set(0, 30, 40)
     light.castShadow = true // 启用阴影选项
     scene.add(light)
+
+    // 添加辅助光源
+    var backLight = new THREE.DirectionalLight(0xffffff, 0.5)
+    backLight.position.set(0, 10, -20)
+    scene.add(backLight)
 
     //环境光设置
     var ambilight = new THREE.AmbientLight(0xffffff, 0.2)
@@ -148,6 +156,75 @@
       renderer.render(scene, camera)
     })
 
+    function getDetailedDirection(horizontalAngle, verticalAngle) {
+      let description = ''
+
+      // 水平方向（8个主要方位）
+      if (horizontalAngle >= -22.5 && horizontalAngle < 22.5) {
+        description += '正北'
+      } else if (horizontalAngle >= 22.5 && horizontalAngle < 67.5) {
+        description += '东北'
+      } else if (horizontalAngle >= 67.5 && horizontalAngle < 112.5) {
+        description += '正东'
+      } else if (horizontalAngle >= 112.5 && horizontalAngle < 157.5) {
+        description += '东南'
+      } else if (horizontalAngle >= 157.5 || horizontalAngle < -157.5) {
+        description += '正南'
+      } else if (horizontalAngle >= -157.5 && horizontalAngle < -112.5) {
+        description += '西南'
+      } else if (horizontalAngle >= -112.5 && horizontalAngle < -67.5) {
+        description += '正西'
+      } else {
+        description += '西北'
+      }
+
+      // 垂直方向
+      if (verticalAngle > 30) {
+        description += '上方'
+      } else if (verticalAngle < -30) {
+        description += '下方'
+      }
+      // 接近水平时不需要特别标注
+
+      return description
+    }
+
+    // 计算相机到标记的距离
+    function getDistanceDescription(distance) {
+      if (distance < 1) {
+        return '很近'
+      } else if (distance < 3) {
+        return '较近'
+      } else if (distance < 6) {
+        return '中等距离'
+      } else {
+        return '较远'
+      }
+    }
+
+    // 在渲染循环中添加方位描述
+    onRenderFcts.push(function () {
+      if (scene.visible) {
+        var cameraPosition = new THREE.Vector3()
+        camera.getWorldPosition(cameraPosition)
+
+        var horizontalAngle = (Math.atan2(cameraPosition.x, cameraPosition.z) * 180) / Math.PI
+        var distanceXY = Math.sqrt(
+          cameraPosition.x * cameraPosition.x + cameraPosition.z * cameraPosition.z,
+        )
+        var verticalAngle = (Math.atan2(cameraPosition.y, distanceXY) * 180) / Math.PI
+        var distance = cameraPosition.length()
+
+        var direction = getDetailedDirection(horizontalAngle, verticalAngle)
+        var distanceDesc = getDistanceDescription(distance)
+        var description = `相机位于标记${direction}方向，${distanceDesc}，水平角度${Math.round(horizontalAngle)}°，垂直角度${Math.round(verticalAngle)}°`
+        console.log(description)
+        document.querySelector('#position-output').textContent = description
+      } else {
+        document.querySelector('#position-output').textContent = ''
+      }
+    })
+
     // run the rendering loop
     var lastTimeMsec = null
     requestAnimationFrame(function animate(nowMsec) {
@@ -175,8 +252,9 @@
     var onError = function (xhr) {}
     var mesh = new THREE.Mesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshBasicMaterial({ color: 'red' }),
+      new THREE.MeshStandardMaterial({ color: 'red', metalness: 0.1, roughness: 0.5 }),
     )
+    mesh.castShadow = true
     scene.add(mesh)
 
     // var mtlLoader = new THREE.MTLLoader()
