@@ -26,32 +26,10 @@
     -webkit-transform: translate3d(0, 0, 0);
   "
 >
-  <!-- <div style="position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1">
-     
-    <div id="Stats-output"></div>
-  </div> -->
   <div style="position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1">
     <div id="position-output"></div>
   </div>
   <script>
-    // var obj
-    // //fps监测
-    // var stats = initStats()
-
-    // //fps状态
-    // function initStats() {
-    //   var stats = new Stats()
-    //   stats.setMode(0) // 0: fps, 1: ms
-
-    //   // Align top-left
-    //   stats.domElement.style.position = 'absolute'
-    //   stats.domElement.style.left = '0px'
-    //   stats.domElement.style.top = '0px'
-
-    //   document.getElementById('Stats-output').appendChild(stats.domElement)
-    //   return stats
-    // }
-
     // init renderer
     var renderer = new THREE.WebGLRenderer({
       antialias: true, //开启抗锯齿
@@ -59,6 +37,7 @@
     })
     renderer.setClearColor(new THREE.Color('lightgrey'), 0)
     renderer.setSize(window.innerWidth, window.innerHeight)
+    renderer.setPixelRatio(window.devicePixelRatio)
     renderer.domElement.style.position = 'absolute'
     renderer.domElement.style.top = '0px'
     renderer.domElement.style.left = '0px'
