@@ -34,6 +34,8 @@
     "vue-router": "^4.5.1",
     "y-quill": "^1.0.0",
     "y-webrtc": "^10.3.0",
+    "y-websocket": "^3.0.0",
+    "y-websocket-server": "^1.0.2",
     "yjs": "^13.6.27"
   },
   "devDependencies": {
