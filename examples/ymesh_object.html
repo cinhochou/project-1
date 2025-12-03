@@ -1,0 +1,162 @@
+<!-- 描述：-->
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ymesh_object_Demo</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background: #222;
+      }
+    </style>
+  </head>
+  <body>
+    <script src="bulid/three.js"></script>
+    <script src="bulid/OrbitControls.js"></script>
+
+    <script type="module">
+      import * as Y from 'yjs'
+      import { WebrtcProvider } from 'y-webrtc'
+
+      const scene = new THREE.Scene()
+      scene.background = new THREE.Color(0x222222)
+
+      const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 1000)
+      camera.position.set(6, 6, 10)
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true })
+      renderer.setSize(innerWidth, innerHeight)
+      renderer.setPixelRatio(devicePixelRatio)
+      document.body.appendChild(renderer.domElement)
+
+      // 只用于自由视角，不影响物体
+      const controls = new THREE.OrbitControls(camera, renderer.domElement)
+      //controls.enableDamping = true
+      //controls.dampingFactor = 0.08
+
+      const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(2, 2, 2),
+        new THREE.MeshPhongMaterial({ color: 0x00ff88 }),
+      )
+      scene.add(cube)
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.5)
+      dirLight.position.set(5, 10, 7)
+      scene.add(dirLight)
+      scene.add(new THREE.AmbientLight(0xffffff, 0.5))
+
+      // ==================== Yjs 只同步 rotation + scale ====================
+      const ydoc = new Y.Doc()
+      const provider = new WebrtcProvider('mouse-only-sync-2025', ydoc, {
+        signaling: ['ws://localhost:4444'],
+      })
+
+      const shared = ydoc.getMap('cube')
+
+      // 初始化
+      if (!shared.has('rotation')) shared.set('rotation', { x: 0, y: 0, z: 0 })
+      if (!shared.has('scale')) shared.set('scale', { x: 1, y: 1, z: 1 })
+
+      let last = { rot: null, scl: null }
+
+      // 远程 → 本地
+      shared.observe(() => {
+        const r = shared.get('rotation')
+        const s = shared.get('scale')
+        if (r) {
+          cube.rotation.set(r.x, r.y, r.z)
+          last.rot = { ...r }
+        }
+        if (s) {
+          cube.scale.set(s.x, s.y, s.z)
+          last.scl = { ...s }
+        }
+      })
+
+      // 每帧同步（防抖）
+      function syncObject() {
+        const r = cube.rotation
+        const s = cube.scale
+
+        const rotChanged =
+          !last.rot ||
+          Math.abs(r.x - last.rot.x) > 1e-6 ||
+          Math.abs(r.y - last.rot.y) > 1e-6 ||
+          Math.abs(r.z - last.rot.z) > 1e-6
+        const sclChanged =
+          !last.scl ||
+          Math.abs(s.x - last.scl.x) > 1e-6 ||
+          Math.abs(s.y - last.scl.y) > 1e-6 ||
+          Math.abs(s.z - last.scl.z) > 1e-6
+
+        if (rotChanged || sclChanged) {
+          ydoc.transact(() => {
+            if (rotChanged) shared.set('rotation', { x: r.x, y: r.y, z: r.z })
+            if (sclChanged) shared.set('scale', { x: s.x, y: s.y, z: s.z })
+          })
+          if (rotChanged) last.rot = { x: r.x, y: r.y, z: r.z }
+          if (sclChanged) last.scl = { x: s.x, y: s.y, z: s.z }
+        }
+      }
+
+      // ==================== 鼠标交互（核心）===================
+      let isDragging = false
+      let prev = { x: 0, y: 0 }
+
+      const onPointerDown = (e) => {
+        if (e.button !== 0) return // 只响应左键
+        isDragging = true
+        prev = { x: e.clientX, y: e.clientY }
+      }
+
+      const onPointerMove = (e) => {
+        if (!isDragging) return
+        const dx = e.clientX - prev.x
+        const dy = e.clientY - prev.y
+
+        // 直接旋转物体（不影响相机）
+        cube.rotation.y += dx * 0.01
+        cube.rotation.x += dy * 0.01
+
+        prev = { x: e.clientX, y: e.clientY }
+      }
+
+      const onPointerUp = () => (isDragging = false)
+
+      // 滚轮缩放物体（不影响相机距离）
+      const onWheel = (e) => {
+        e.preventDefault()
+        const delta = e.deltaY > 0 ? 0.95 : 1.05
+        cube.scale.multiplyScalar(delta)
+        // 可选：限制最小最大尺寸
+        const min = 0.2,
+          max = 10
+        cube.scale.x = cube.scale.y = cube.scale.z = Math.max(min, Math.min(max, cube.scale.x))
+      }
+
+      renderer.domElement.addEventListener('pointerdown', onPointerDown)
+      renderer.domElement.addEventListener('pointermove', onPointerMove)
+      renderer.domElement.addEventListener('pointerup', onPointerUp)
+      renderer.domElement.addEventListener('pointerleave', onPointerUp)
+      renderer.domElement.addEventListener('wheel', onWheel, { passive: false })
+
+      // 动画循环
+      function animate() {
+        requestAnimationFrame(animate)
+        controls.update()
+        syncObject() // 每帧同步
+        renderer.render(scene, camera)
+      }
+      animate()
+
+      window.addEventListener('resize', () => {
+        camera.aspect = innerWidth / innerHeight
+        camera.updateProjectionMatrix()
+        renderer.setSize(innerWidth, innerHeight)
+      })
+    </script>
+  </body>
+</html>

@@ -1,3 +1,4 @@
+/*该方案已废弃，原因：臃肿、难以实现且影响性能*/
 <template>
   <div id="app">
     <div id="ar_container">
