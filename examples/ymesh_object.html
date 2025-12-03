@@ -112,26 +112,28 @@
         prev = { x: e.clientX, y: e.clientY }
       }
 
+      // 旋转规范化：使用窗口比例计算增量
       const onPointerMove = (e) => {
         if (!isDragging) return
-        const dx = e.clientX - prev.x
-        const dy = e.clientY - prev.y
+        const dx = ((e.clientX - prev.x) / window.innerWidth) * Math.PI // 归一化并转换为弧度
+        const dy = ((e.clientY - prev.y) / window.innerHeight) * Math.PI
 
-        // 直接旋转物体（不影响相机）
-        cube.rotation.y += dx * 0.01
-        cube.rotation.x += dy * 0.01
+        cube.rotation.y += dx
+        cube.rotation.x += dy
 
         prev = { x: e.clientX, y: e.clientY }
       }
 
       const onPointerUp = () => (isDragging = false)
 
-      // 滚轮缩放物体（不影响相机距离）
+      // 缩放规范化：仅用符号判断，应用固定步长
       const onWheel = (e) => {
         e.preventDefault()
-        const delta = e.deltaY > 0 ? 0.95 : 1.05
-        cube.scale.multiplyScalar(delta)
-        // 可选：限制最小最大尺寸
+        const direction = e.deltaY > 0 ? -1 : 1 // 正向放大，负向缩小
+        const factor = 1 + direction * 0.1 // 固定步长 10%
+        cube.scale.multiplyScalar(factor)
+
+        // 限制尺寸
         const min = 0.2,
           max = 10
         cube.scale.x = cube.scale.y = cube.scale.z = Math.max(min, Math.min(max, cube.scale.x))
