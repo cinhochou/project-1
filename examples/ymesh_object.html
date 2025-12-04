@@ -1,10 +1,9 @@
-<!-- 描述：-->
 <!doctype html>
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ymesh_object_Demo</title>
+    <title>ymesh_object_Demo_Fixed</title>
     <style>
       body {
         margin: 0;
@@ -14,6 +13,48 @@
     </style>
   </head>
   <body>
+    <div
+      id="size-display"
+      style="
+        position: fixed;
+        top: 12px;
+        left: 12px;
+        background: rgba(0, 0, 0, 0.65);
+        color: rgb(255, 255, 255);
+        font-family: 'Courier New', monospace;
+        font-size: 14px;
+        font-weight: bold;
+        padding: 8px 12px;
+        border-radius: 6px;
+        border: 1px solid #0f0;
+        z-index: 10000;
+        user-select: none;
+        pointer-events: none;
+        backdrop-filter: blur(4px);
+        box-shadow: 0 2px 10px rgba(0, 255, 0, 0.2);
+        min-width: 180px;
+        text-align: center;
+        transition: all 0.2s ease;
+      "
+    >
+      Window: <span id="size-text">0000 × 0000</span>
+    </div>
+
+    <!-- 操作提示 -->
+    <div
+      style="
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        color: #aaa;
+        font-family: sans-serif;
+        font-size: 12px;
+        pointer-events: none;
+        text-align: center;
+      "
+    ></div>
+
     <script src="bulid/three.js"></script>
     <script src="bulid/OrbitControls.js"></script>
 
@@ -32,10 +73,14 @@
       renderer.setPixelRatio(devicePixelRatio)
       document.body.appendChild(renderer.domElement)
 
-      // 只用于自由视角，不影响物体
+      // 将 OrbitControls 配置为只响应右键，避免与方块旋转（左键）冲突
       const controls = new THREE.OrbitControls(camera, renderer.domElement)
-      //controls.enableDamping = true
-      //controls.dampingFactor = 0.08
+      controls.mouseButtons = {
+        LEFT: null, // 禁用左键（留给方块旋转）
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE, // 右键旋转相机
+      }
+      controls.enableZoom = false // 禁用 OrbitControls 的缩放，避免与方块缩放冲突
 
       const cube = new THREE.Mesh(
         new THREE.BoxGeometry(2, 2, 2),
@@ -48,21 +93,18 @@
       scene.add(dirLight)
       scene.add(new THREE.AmbientLight(0xffffff, 0.5))
 
-      // ==================== Yjs 只同步 rotation + scale ====================
       const ydoc = new Y.Doc()
-      const provider = new WebrtcProvider('mouse-only-sync-2025', ydoc, {
+      const provider = new WebrtcProvider('Y-cube-object', ydoc, {
         signaling: ['ws://localhost:4444'],
       })
 
       const shared = ydoc.getMap('cube')
 
-      // 初始化
       if (!shared.has('rotation')) shared.set('rotation', { x: 0, y: 0, z: 0 })
       if (!shared.has('scale')) shared.set('scale', { x: 1, y: 1, z: 1 })
 
       let last = { rot: null, scl: null }
 
-      // 远程 → 本地
       shared.observe(() => {
         const r = shared.get('rotation')
         const s = shared.get('scale')
@@ -76,7 +118,6 @@
         }
       })
 
-      // 每帧同步（防抖）
       function syncObject() {
         const r = cube.rotation
         const s = cube.scale
@@ -102,38 +143,50 @@
         }
       }
 
-      // ==================== 鼠标交互（核心）===================
       let isDragging = false
       let prev = { x: 0, y: 0 }
+
+      // 定义固定的旋转灵敏度 (弧度/像素)
+      // 无论屏幕多大，鼠标移动 1px 对应的旋转角度是固定的
+      const ROTATION_SENSITIVITY = 0.005
 
       const onPointerDown = (e) => {
         if (e.button !== 0) return // 只响应左键
         isDragging = true
         prev = { x: e.clientX, y: e.clientY }
+        renderer.domElement.style.cursor = 'grabbing'
       }
 
-      // 旋转规范化：使用窗口比例计算增量
       const onPointerMove = (e) => {
         if (!isDragging) return
-        const dx = ((e.clientX - prev.x) / window.innerWidth) * Math.PI // 归一化并转换为弧度
-        const dy = ((e.clientY - prev.y) / window.innerHeight) * Math.PI
 
-        cube.rotation.y += dx
-        cube.rotation.x += dy
+        // 计算像素差值
+        const deltaX = e.clientX - prev.x
+        const deltaY = e.clientY - prev.y
+
+        // 使用固定灵敏度
+        const rotateY = deltaX * ROTATION_SENSITIVITY
+        const rotateX = deltaY * ROTATION_SENSITIVITY
+
+        cube.rotation.y += rotateY
+        cube.rotation.x += rotateX
 
         prev = { x: e.clientX, y: e.clientY }
       }
 
-      const onPointerUp = () => (isDragging = false)
+      const onPointerUp = () => {
+        isDragging = false
+        renderer.domElement.style.cursor = 'auto'
+      }
 
-      // 缩放规范化：仅用符号判断，应用固定步长
       const onWheel = (e) => {
         e.preventDefault()
-        const direction = e.deltaY > 0 ? -1 : 1 // 正向放大，负向缩小
-        const factor = 1 + direction * 0.1 // 固定步长 10%
-        cube.scale.multiplyScalar(factor)
+        // 保持原有的缩放逻辑，这部分其实是相对值的，只要不依赖屏幕尺寸即可
+        // 稍微调整一下逻辑，使其更平滑，但保持核心一致性
+        const scaleFactor = e.deltaY > 0 ? 0.9 : 1.1
 
-        // 限制尺寸
+        cube.scale.multiplyScalar(scaleFactor)
+
         const min = 0.2,
           max = 10
         cube.scale.x = cube.scale.y = cube.scale.z = Math.max(min, Math.min(max, cube.scale.x))
@@ -145,20 +198,30 @@
       renderer.domElement.addEventListener('pointerleave', onPointerUp)
       renderer.domElement.addEventListener('wheel', onWheel, { passive: false })
 
-      // 动画循环
       function animate() {
         requestAnimationFrame(animate)
-        controls.update()
-        syncObject() // 每帧同步
+        //controls.update()
+        syncObject()
         renderer.render(scene, camera)
       }
       animate()
 
+      // 窗口大小调整
       window.addEventListener('resize', () => {
         camera.aspect = innerWidth / innerHeight
         camera.updateProjectionMatrix()
         renderer.setSize(innerWidth, innerHeight)
+        updateWindowSize()
       })
+
+      // 尺寸显示逻辑
+      const sizeText = document.getElementById('size-text')
+      function updateWindowSize() {
+        const w = window.innerWidth
+        const h = window.innerHeight
+        sizeText.textContent = `${w.toString().padStart(4)} × ${h.toString().padStart(4)}`
+      }
+      updateWindowSize()
     </script>
   </body>
 </html>
