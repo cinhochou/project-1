@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>房间</title>
+    <style>
+      html,
+      body {
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        font-family: sans-serif;
+      }
+      #ui {
+        position: absolute;
+        right: 12px;
+        top: 12px;
+        background: rgba(255, 255, 255, 0.92);
+        padding: 10px;
+        border-radius: 8px;
+        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+        z-index: 10;
+        width: 220px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        margin-top: 6px;
+      }
+      input[type='range'] {
+        width: 100%;
+      }
+      #status {
+        margin-top: 8px;
+        font-size: 12px;
+        color: #333;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="ui">
+      <div>
+        <label>房间名 (room): <input id="room" value="cubeRoom" /></label>
+        <button id="join">加入房间</button>
+        <button id="leave">离开</button>
+      </div>
+
+      <label>Rotate X <input id="rx" type="range" min="0" max="6.283" step="0.001" /></label>
+      <label>Rotate Y <input id="ry" type="range" min="0" max="6.283" step="0.001" /></label>
+      <label>Rotate Z <input id="rz" type="range" min="0" max="6.283" step="0.001" /></label>
+
+      <label>Scale <input id="s" type="range" min="0.1" max="3" step="0.01" /></label>
+
+      <div id="status">状态：未连接</div>
+      <small>提示：拖动滑块改变方块，其他已加入相同房间的浏览器会同步这些变化。</small>
+    </div>
+
+    <!-- CDN 脚本（示例用 jsDelivr / unpkg；可换成你本地打包版） -->
+    <script src="bulid/three.js"></script>
+
+    <script type="module">
+      import * as Y from 'yjs'
+      import { WebrtcProvider } from 'y-webrtc'
+      ;(function () {
+        // --- three.js 基本场景（相机不会被同步或被外部控制） ---
+        const scene = new THREE.Scene()
+        const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 1000)
+        camera.position.set(0, 1.5, 4)
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true })
+        renderer.setSize(innerWidth, innerHeight)
+        renderer.setPixelRatio(window.devicePixelRatio || 1)
+        document.body.appendChild(renderer.domElement)
+
+        // lights
+        const dir = new THREE.DirectionalLight(0xffffff, 0.9)
+        dir.position.set(5, 10, 7)
+        scene.add(dir)
+        scene.add(new THREE.AmbientLight(0x666666))
+
+        // cube
+        const geometry = new THREE.BoxGeometry(1, 1, 1)
+        const material = new THREE.MeshStandardMaterial({ color: 0x4aa3df })
+        const cube = new THREE.Mesh(geometry, material)
+        scene.add(cube)
+
+        // ground
+        const ground = new THREE.Mesh(
+          new THREE.PlaneGeometry(20, 20),
+          new THREE.MeshStandardMaterial({ color: 0xeeeeee }),
+        )
+        ground.rotation.x = -Math.PI / 2
+        ground.position.y = -0.75
+        scene.add(ground)
+
+        window.addEventListener('resize', () => {
+          camera.aspect = innerWidth / innerHeight
+          camera.updateProjectionMatrix()
+          renderer.setSize(innerWidth, innerHeight)
+        })
+
+        // --- Yjs + y-webrtc setup (provider created when join 按钮按下) ---
+        let ydoc = null
+        let provider = null
+        let cubeMap = null
+        let isApplyingRemote = false // 防止回路（不是严格必要，但方便）
+        const statusEl = document.getElementById('status')
+
+        // UI elements
+        const rxInput = document.getElementById('rx')
+        const ryInput = document.getElementById('ry')
+        const rzInput = document.getElementById('rz')
+        const sInput = document.getElementById('s')
+        const roomInput = document.getElementById('room')
+        const joinBtn = document.getElementById('join')
+        const leaveBtn = document.getElementById('leave')
+
+        // 初始化滑块值（本地默认）
+        function setUIFromCube() {
+          rxInput.value = cube.rotation.x
+          ryInput.value = cube.rotation.y
+          rzInput.value = cube.rotation.z
+          sInput.value = cube.scale.x // uniform scale
+        }
+        setUIFromCube()
+
+        // 当本地 UI 改变：写入 Yjs（这是唯一会写入协作文档的动作）
+        function writeToYjs() {
+          if (!cubeMap) return
+          // 将旋转和缩放写为简单数字对象
+          const rot = {
+            x: parseFloat(rxInput.value),
+            y: parseFloat(ryInput.value),
+            z: parseFloat(rzInput.value),
+          }
+          const scl = parseFloat(sInput.value)
+
+          // 标记为本地变更
+          cubeMap.set('rotation', rot)
+          cubeMap.set('scale', scl)
+        }
+
+        // 绑定滑块事件（本地控制）
+        ;[rxInput, ryInput, rzInput].forEach((el) => {
+          el.addEventListener('input', () => {
+            cube.rotation.set(
+              parseFloat(rxInput.value),
+              parseFloat(ryInput.value),
+              parseFloat(rzInput.value),
+            )
+            writeToYjs()
+          })
+        })
+        sInput.addEventListener('input', () => {
+          const v = parseFloat(sInput.value)
+          cube.scale.set(v, v, v)
+          writeToYjs()
+        })
+
+        // 在 Yjs 上观察变化并应用到本地 cube（**仅应用，绝不改动相机**）
+        function setupCubeObserver() {
+          if (!cubeMap) return
+
+          cubeMap.observe((event) => {
+            // event.changes.keys gives changed keys; we'll read current values
+            // To avoid echo loops, we set a guard flag while applying remote updates
+            isApplyingRemote = true
+            try {
+              const rot = cubeMap.get('rotation')
+              const scl = cubeMap.get('scale')
+
+              if (rot && typeof rot.x === 'number') {
+                cube.rotation.set(rot.x, rot.y, rot.z)
+              }
+              if (typeof scl === 'number') {
+                cube.scale.set(scl, scl, scl)
+              }
+              // update UI to reflect remote change
+              setUIFromCube()
+            } finally {
+              // small timeout to ensure local write events don't race; not strictly necessary
+              setTimeout(() => (isApplyingRemote = false), 0)
+            }
+          })
+        }
+
+        // join / leave 控制
+        joinBtn.addEventListener('click', () => {
+          if (provider) {
+            statusEl.textContent = '已在房间中'
+            return
+          }
+          const room = roomInput.value || 'three-yjs-demo'
+          // 新建 Y.Doc 并使用 y-webrtc 连接（默认使用内置信令服务器列表）
+          ydoc = new Y.Doc()
+          // WebrtcProvider is exposed by y-webrtc UMD (global: WebrtcProvider)
+          provider = new WebrtcProvider(room, ydoc, { signaling: ['ws://localhost:4444'] }) // 注意：如果你想指定 signaling servers, 可传第三个参数 { signaling: [...] }
+
+          // get/create a shared map for the cube data
+          cubeMap = ydoc.getMap('cube')
+
+          // 当 provider 同步完成后可以显示状态（provider 会触发 "synced" 事件）
+          provider.on('synced', (synced) => {
+            statusEl.textContent = '已同步到房间：' + room + (synced ? ' (synced)' : '')
+          })
+          // 监听 peers 变化（显示连接数量）
+          provider.on('peers', (event) => {
+            // event.webrtcPeers 是唯一保证存在的 Map
+            const total = event.webrtcPeers.size
+
+            statusEl.textContent = `房间：${room} — peers: ${total}`
+          })
+
+          // 首次加入：如果没有值，则初始化（只由首个创建者写入）
+          // 这里用 transact 确保原子性
+          if (!cubeMap.has('rotation') || !cubeMap.has('scale')) {
+            ydoc.transact(() => {
+              cubeMap.set('rotation', {
+                x: cube.rotation.x,
+                y: cube.rotation.y,
+                z: cube.rotation.z,
+              })
+              cubeMap.set('scale', cube.scale.x)
+            })
+          } else {
+            // 如果已有远端数据，应用到本地 cube
+            const rot = cubeMap.get('rotation')
+            const scl = cubeMap.get('scale')
+            if (rot) cube.rotation.set(rot.x, rot.y, rot.z)
+            if (typeof scl === 'number') cube.scale.set(scl, scl, scl)
+            setUIFromCube()
+          }
+
+          // 监听 map 改动并应用（远端或本地写都会触发，但本地写已经直接由 UI 反映）
+          setupCubeObserver()
+          statusEl.textContent = '加入房间中...'
+        })
+
+        leaveBtn.addEventListener('click', () => {
+          if (!provider) {
+            statusEl.textContent = '未连接'
+            return
+          }
+          try {
+            provider.destroy()
+          } catch (e) {
+            console.warn(e)
+          }
+          try {
+            ydoc.destroy()
+          } catch (e) {}
+          provider = null
+          ydoc = null
+          cubeMap = null
+          statusEl.textContent = '已离开房间'
+        })
+
+        // 小提示：避免在 observer 中将 UI 的变动再次写回 Yjs（造成 loop）
+        // 这里 writeToYjs 只会在滑块 input 触发时执行，所以远端应用时我们只是更新 UI / three.js
+        // （如果你想更严格避免回环，可以用 isApplyingRemote 去阻止写入；当前实现已经较简单可靠）
+
+        // --- 简单渲染循环 ---
+        function animate() {
+          requestAnimationFrame(animate)
+          renderer.render(scene, camera)
+        }
+        animate()
+
+        // 可选：添加鼠标拖动直接控制方块（而不是相机）
+        let dragging = false
+        let lastX = 0,
+          lastY = 0
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+          dragging = true
+          lastX = e.clientX
+          lastY = e.clientY
+          renderer.domElement.setPointerCapture(e.pointerId)
+        })
+        renderer.domElement.addEventListener('pointermove', (e) => {
+          if (!dragging) return
+          const dx = (e.clientX - lastX) * 0.01
+          const dy = (e.clientY - lastY) * 0.01
+          lastX = e.clientX
+          lastY = e.clientY
+          cube.rotation.y += dx
+          cube.rotation.x += dy
+          // 更新 UI + 写入 Yjs
+          setUIFromCube()
+          writeToYjs()
+        })
+        renderer.domElement.addEventListener('pointerup', (e) => {
+          dragging = false
+          try {
+            renderer.domElement.releasePointerCapture(e.pointerId)
+          } catch (e) {}
+        })
+
+        renderer.domElement.addEventListener(
+          'wheel',
+          (e) => {
+            e.preventDefault()
+
+            // deltaY > 0 缩小，deltaY < 0 放大
+            const scaleChange = e.deltaY * -0.001
+            let newScale = cube.scale.x + scaleChange
+
+            // 限制缩放范围
+            newScale = Math.max(0.1, Math.min(3, newScale))
+
+            // 应用到 cube
+            cube.scale.set(newScale, newScale, newScale)
+
+            // 更新 UI 显示
+            sInput.value = newScale
+
+            // 写入 Yjs，同步给其他客户端
+            writeToYjs()
+          },
+          { passive: false },
+        )
+
+        // 禁用默认右键菜单以便直接交互
+        window.addEventListener('contextmenu', (e) => e.preventDefault())
+      })()
+    </script>
+  </body>
+</html>
