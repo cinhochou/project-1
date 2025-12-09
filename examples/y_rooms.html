@@ -55,7 +55,6 @@
       <label>Scale <input id="s" type="range" min="0.1" max="3" step="0.01" /></label>
 
       <div id="status">状态：未连接</div>
-      <small>提示：拖动滑块改变方块，其他已加入相同房间的浏览器会同步这些变化。</small>
     </div>
 
     <!-- CDN 脚本（示例用 jsDelivr / unpkg；可换成你本地打包版） -->
@@ -160,7 +159,7 @@
           writeToYjs()
         })
 
-        // 在 Yjs 上观察变化并应用到本地 cube（**仅应用，绝不改动相机**）
+        // 在 Yjs 上观察变化并应用到本地 cube
         function setupCubeObserver() {
           if (!cubeMap) return
 
@@ -193,7 +192,7 @@
             statusEl.textContent = '已在房间中'
             return
           }
-          const room = roomInput.value || 'three-yjs-demo'
+          const room = roomInput.value || 'cubeRoom'
           // 新建 Y.Doc 并使用 y-webrtc 连接（默认使用内置信令服务器列表）
           ydoc = new Y.Doc()
           // WebrtcProvider is exposed by y-webrtc UMD (global: WebrtcProvider)
