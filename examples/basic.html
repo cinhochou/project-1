@@ -12,8 +12,6 @@
 <script src="bulid/OBJLoader.js"></script>
 <script type="module">
   import ArBaseControls from './bulid/threex-arbasecontrols.js'
-  import * as Y from 'yjs'
-  import { WebrtcProvider } from 'y-webrtc'
   window.ArBaseControls = ArBaseControls
 </script>
 
@@ -30,7 +28,9 @@
   <div style="position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1">
     <div id="position-output"></div>
   </div>
-  <script>
+  <script type="module">
+    import * as Y from 'yjs'
+    import { WebrtcProvider } from 'y-webrtc'
     // init renderer
     var renderer = new THREE.WebGLRenderer({
       antialias: true, //开启抗锯齿
@@ -65,7 +65,7 @@
     scene.add(ambilight)
 
     // 初始化摄像机位置(0，0，0)
-    camera = new THREE.Camera()
+    var camera = new THREE.Camera()
     scene.add(camera)
 
     // handle arToolkitSource
@@ -259,6 +259,7 @@
     let initialRotation = 0
     let isSingleTouch = false
     let previousTouchPosition = null
+    let targetObject = mesh // 默认操控 mesh 对象，可根据需要更改为 obj
 
     function handleTouchStart(e) {
       if (e.touches.length === 2) {
@@ -285,107 +286,42 @@
     function handleTouchMove(e) {
       e.preventDefault() // 防止页面滚动
 
-      if (e.touches.length === 2 && initialTouches && obj) {
-        // 双指处理：缩放和旋转
+      // 确保目标对象存在
+      if (!targetObject) return
+
+      if (e.touches.length === 2 && initialTouches) {
+        // 双指处理：只处理缩放
         const currentTouches = [
           { x: e.touches[0].clientX, y: e.touches[0].clientY },
           { x: e.touches[1].clientX, y: e.touches[1].clientY },
         ]
 
-        // 计算当前距离和角度
+        // 计算当前距离
         const dx = currentTouches[1].x - currentTouches[0].x
         const dy = currentTouches[1].y - currentTouches[0].y
         const currentScale = Math.sqrt(dx * dx + dy * dy)
-        const currentRotation = Math.atan2(dy, dx)
 
         // 处理缩放
         if (currentScale > 0 && initialScale > 0) {
           const scaleChange = currentScale / initialScale
 
           // 限制缩放范围，防止模型过大或过小
-          const minScale = 0.00001
-          const maxScale = 0.001
-          const newScaleX = obj.scale.x * scaleChange
-          const newScaleY = obj.scale.y * scaleChange
-          const newScaleZ = obj.scale.z * scaleChange
-
-          if (newScaleX >= minScale && newScaleX <= maxScale) {
-            obj.scale.set(newScaleX, newScaleY, newScaleZ)
-          }
-
-          // 更新初始值以支持连续缩放
-          initialScale = currentScale
-        }
-
-        // 处理旋转
-        const rotationDelta = currentRotation - initialRotation
-        obj.rotation.y += rotationDelta
-
-        // 更新初始旋转值以支持连续旋转
-        initialRotation = currentRotation
-      } else if (e.touches.length === 1 && isSingleTouch && obj && previousTouchPosition) {
-        // 单指处理：旋转模型
-        const currentTouch = {
-          x: e.touches[0].clientX,
-          y: e.touches[0].clientY,
-        }
-
-        // 计算移动差值
-        const deltaX = currentTouch.x - previousTouchPosition.x
-        const deltaY = currentTouch.y - previousTouchPosition.y
-
-        // 根据水平移动旋转模型（调整系数以改变灵敏度）
-        obj.rotation.y += deltaX * 0.01
-        obj.rotation.x += deltaY * 0.01
-
-        // 更新位置
-        previousTouchPosition = currentTouch
-      }
-    }
-
-    // 修改handleTouchMove函数中的obj为mesh
-    function handleMeshTouchMove(e) {
-      e.preventDefault() // 防止页面滚动
-      if (e.touches.length === 2 && initialTouches && mesh) {
-        // 双指处理：缩放和旋转
-        const currentTouches = [
-          { x: e.touches[0].clientX, y: e.touches[0].clientY },
-          { x: e.touches[1].clientX, y: e.touches[1].clientY },
-        ]
-
-        // 计算当前距离和角度
-        const dx = currentTouches[1].x - currentTouches[0].x
-        const dy = currentTouches[1].y - currentTouches[0].y
-        const currentScale = Math.sqrt(dx * dx + dy * dy)
-        const currentRotation = Math.atan2(dy, dx)
-
-        // 处理缩放
-        if (currentScale > 0 && initialScale > 0) {
-          const scaleChange = currentScale / initialScale
-
-          // 限制缩放范围，防止模型过大或过小
-          const minScale = 0.001
+          const minScale = 0.1
           const maxScale = 5
-          const newScaleX = mesh.scale.x * scaleChange
-          const newScaleY = mesh.scale.y * scaleChange
-          const newScaleZ = mesh.scale.z * scaleChange
+          const newScaleX = targetObject.scale.x * scaleChange
+          const newScaleY = targetObject.scale.y * scaleChange
+          const newScaleZ = targetObject.scale.z * scaleChange
 
           if (newScaleX >= minScale && newScaleX <= maxScale) {
-            mesh.scale.set(newScaleX, newScaleY, newScaleZ)
+            targetObject.scale.set(newScaleX, newScaleY, newScaleZ)
           }
 
           // 更新初始值以支持连续缩放
           initialScale = currentScale
+          writeToYjs()
         }
-
-        // 处理旋转
-        const rotationDelta = currentRotation - initialRotation
-        mesh.rotation.y += rotationDelta
-
-        // 更新初始旋转值以支持连续旋转
-        initialRotation = currentRotation
-      } else if (e.touches.length === 1 && isSingleTouch && mesh && previousTouchPosition) {
-        // 单指处理：旋转模型
+      } else if (e.touches.length === 1 && isSingleTouch && previousTouchPosition) {
+        // 单指处理：只处理旋转
         const currentTouch = {
           x: e.touches[0].clientX,
           y: e.touches[0].clientY,
@@ -395,18 +331,94 @@
         const deltaX = currentTouch.x - previousTouchPosition.x
         const deltaY = currentTouch.y - previousTouchPosition.y
 
-        // 根据水平移动旋转模型（调整系数以改变灵敏度）
-        mesh.rotation.y += deltaX * 0.01
-        mesh.rotation.x += deltaY * 0.01
+        // 根据水平和垂直移动旋转模型（调整系数以改变灵敏度）
+        targetObject.rotation.y += deltaX * 0.01
+        targetObject.rotation.x += deltaY * 0.01
 
         // 更新位置
         previousTouchPosition = currentTouch
+        writeToYjs()
       }
     }
+
     // 添加触摸事件监听器
     document.addEventListener('touchstart', handleTouchStart, { passive: false })
-    //document.addEventListener('touchmove', handleTouchMove, { passive: false })
-    document.addEventListener('touchmove', handleMeshTouchMove, { passive: false })
+    document.addEventListener('touchmove', handleTouchMove, { passive: false })
+    let ydoc = null
+    let provider = null
+    let meshMap = null
+    let isApplyingRemote = false // 防止回路
+    function writeToYjs() {
+      if (!meshMap || isApplyingRemote) return
+
+      const rot = {
+        x: mesh.rotation.x,
+        y: mesh.rotation.y,
+        z: mesh.rotation.z,
+      }
+      const scl = mesh.scale.x
+
+      meshMap.set('rotation', rot)
+      meshMap.set('scale', scl)
+    }
+
+    function setupMeshObserver() {
+      if (!meshMap) return
+
+      meshMap.observe((event) => {
+        // event.changes.keys gives changed keys; we'll read current values
+        // To avoid echo loops, we set a guard flag while applying remote updates
+        isApplyingRemote = true
+        try {
+          const rot = meshMap.get('rotation')
+          const scl = meshMap.get('scale')
+
+          if (rot && typeof rot.x === 'number') {
+            mesh.rotation.set(rot.x, rot.y, rot.z)
+          }
+          if (typeof scl === 'number') {
+            mesh.scale.set(scl, scl, scl)
+          }
+        } finally {
+          // small timeout to ensure local write events don't race; not strictly necessary
+          setTimeout(() => (isApplyingRemote = false), 0)
+        }
+      })
+    }
+    const room = 'meshRoom'
+    ydoc = new Y.Doc()
+    provider = new WebrtcProvider(room, ydoc, { signaling: ['ws://localhost:4444'] })
+    provider.on('status', (event) => {
+      console.log('WebRTC 状态:', event.connected ? '已连接' : '已断开')
+    })
+
+    provider.on('synced', () => {
+      console.log('Yjs 文档同步完成')
+    })
+
+    provider.on('peers', ({ webrtcPeers, bcPeers }) => {
+      const total = webrtcPeers.length + bcPeers.length
+      console.log('在线 peers（含自己）:', total + 1)
+    })
+
+    meshMap = ydoc.getMap('mesh')
+    if (!meshMap.has('rotation') || !meshMap.has('scale')) {
+      ydoc.transact(() => {
+        meshMap.set('rotation', {
+          x: mesh.rotation.x,
+          y: mesh.rotation.y,
+          z: mesh.rotation.z,
+        })
+        meshMap.set('scale', mesh.scale.x)
+      })
+    } else {
+      // 如果已有远端数据，应用到本地 mesh
+      const rot = meshMap.get('rotation')
+      const scl = meshMap.get('scale')
+      if (rot) mesh.rotation.set(rot.x, rot.y, rot.z)
+      if (typeof scl === 'number') mesh.scale.set(scl, scl, scl)
+    }
+    setupMeshObserver()
   </script>
 </body>
 <!-- 部分代码来自https://github.com/webglzhang/WebARDemo和https://github.com/AR-js-org/AR.js -->
