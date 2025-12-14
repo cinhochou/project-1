@@ -387,7 +387,7 @@
     }
     const room = 'meshRoom'
     ydoc = new Y.Doc()
-    provider = new WebrtcProvider(room, ydoc, { signaling: ['ws://localhost:4444'] })
+    provider = new WebrtcProvider(room, ydoc, { signaling: ['ws://localhost:4444'] }) //可使用阿里云服务器部署的ws://47.113.230.182:8080
     provider.on('status', (event) => {
       console.log('WebRTC 状态:', event.connected ? '已连接' : '已断开')
     })
