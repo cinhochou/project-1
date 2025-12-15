@@ -196,7 +196,7 @@
           // 新建 Y.Doc 并使用 y-webrtc 连接（默认使用内置信令服务器列表）
           ydoc = new Y.Doc()
           // WebrtcProvider is exposed by y-webrtc UMD (global: WebrtcProvider)
-          provider = new WebrtcProvider(room, ydoc, { signaling: ['ws://47.113.230.182:8080/'] }) // 注意：如果你想指定 signaling servers, 可传第三个参数 { signaling: [...] }
+          provider = new WebrtcProvider(room, ydoc, { signaling: ['wss://47.113.230.182'] }) // 注意：如果你想指定 signaling servers, 可传第三个参数 { signaling: [...] }
 
           // get/create a shared map for the cube data
           cubeMap = ydoc.getMap('cube')
