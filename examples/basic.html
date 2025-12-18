@@ -25,8 +25,18 @@
     -webkit-transform: translate3d(0, 0, 0);
   "
 >
-  <div style="position: absolute; top: 10px; width: 100%; text-align: center; z-index: 1">
+  <div
+    style="
+      position: absolute;
+      top: 10px;
+      width: 100%;
+      text-align: center;
+      z-index: 1;
+      color: aliceblue;
+    "
+  >
     <div id="position-output"></div>
+    <div id="peer-count"></div>
   </div>
   <script type="module">
     import * as Y from 'yjs'
@@ -388,7 +398,7 @@
     const room = 'meshRoom'
     ydoc = new Y.Doc()
     provider = new WebrtcProvider(room, ydoc, {
-      signaling: ['ws://47.113.230.182:8080/'],
+      signaling: ['wss://electrokinetic-shawanna-unstrewn.ngrok-free.dev/'],
     })
     provider.on('status', (event) => {
       console.log('WebRTC 状态:', event.connected ? '已连接' : '已断开')
@@ -399,8 +409,9 @@
     })
 
     provider.on('peers', ({ webrtcPeers, bcPeers }) => {
-      const total = webrtcPeers.length + bcPeers.length
-      console.log('在线 peers（含自己）:', total + 1)
+      let total = webrtcPeers.length + bcPeers.length + 1
+      console.log('当前在线人数:', total)
+      document.getElementById('peer-count').textContent = `当前在线人数: ${total}`
     })
 
     meshMap = ydoc.getMap('mesh')

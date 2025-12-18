@@ -12,7 +12,10 @@ export default defineConfig({
     open: true,
     cors: true,
     // 添加允许的主机列表，包含ngrok生成的域名
-    allowedHosts: ['kraig-scarabaeiform-zealously.ngrok-free.dev', 'myar.nat123.top'],
+    allowedHosts: [
+      'kraig-scarabaeiform-zealously.ngrok-free.dev',
+      'amara-subtwined-admiringly.ngrok-free.dev',
+    ],
     // 添加代理配置
     proxy: {
       '/api': {
