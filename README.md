@@ -2,6 +2,8 @@
 
 本项目于2025年12月25日（研一上学期在广州大学）后基本不再进行更新，仅作为一个AR-3D协作模型练手项目，包含了大量前期试错的项目，比如使用deepLab、coco-ssd和tensorflow.js对平面进行识别，再加入3D模型到渲染场景中，但是这样做带来了极大的性能开销和极差的效果，我已经放弃这条道路了。后面我使用了GitHub上的AR.js项目的基础上进行改进和加入了yjs完成了这个AR-3D模型协作项目。使用yjs需要部署一个y-webrtc-signaling服务器，端口是4444，需要自行配置。可以搭配ngrok内网穿透开启网页摄像头使用这个项目。本人的前端项目工程意识不是很强，且这个项目出现了大量的问题，仅供学习。
 
+--主要项目都在examples文件夹下，basic.html是AR-3D协作模型的主体--
+
 This template should help get you started developing with Vue 3 in Vite.
 
 ## Recommended IDE Setup
