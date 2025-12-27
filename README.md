@@ -73,4 +73,5 @@ npm run test:e2e
 npm run lint
 ```
 
-@author cinhoChou from GuangZhou university
+##author 
+@cinhoChou from GuangZhou university
